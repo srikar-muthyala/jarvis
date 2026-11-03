@@ -1,0 +1,34 @@
+{
+  "_help": "Name you say -> how to open it. 'launch' is an exe, a URI like spotify:, or a command on PATH. 'process' is the exe name used to close it (leave it out and Jarvis won't close it). With no 'launch', Jarvis searches the Start menu. 'say' is the spoken name, 'heard_as' lists ways the transcriber mishears it. Edit to match what you have installed, then restart.",
+
+  "notepad": {"launch": "notepad.exe", "process": "notepad.exe"},
+  "calculator": {"launch": "calc.exe", "process": "CalculatorApp.exe", "heard_as": ["calc"]},
+  "paint": {"launch": "mspaint.exe", "process": "mspaint.exe"},
+  "file explorer": {"launch": "explorer.exe", "heard_as": ["explorer", "files", "my computer"]},
+  "task manager": {"launch": "taskmgr.exe", "process": "Taskmgr.exe"},
+  "terminal": {"launch": "wt.exe", "process": "WindowsTerminal.exe", "heard_as": ["windows terminal"]},
+  "command prompt": {"launch": "cmd.exe", "heard_as": ["cmd"]},
+  "settings": {"launch": "ms-settings:"},
+
+  "chrome": {"launch": "chrome", "process": "chrome.exe", "heard_as": ["google chrome", "crome"]},
+  "edge": {"launch": "msedge", "process": "msedge.exe", "heard_as": ["microsoft edge"]},
+  "firefox": {"launch": "firefox", "process": "firefox.exe"},
+  "brave": {"launch": "brave", "process": "brave.exe"},
+
+  "spotify": {"launch": "spotify:", "process": "Spotify.exe"},
+  "vs code": {"launch": "code", "process": "Code.exe", "heard_as": ["vscode", "visual studio code", "code"]},
+  "discord": {"process": "Discord.exe"},
+  "slack": {"process": "slack.exe"},
+  "whatsapp": {"launch": "whatsapp:", "process": "WhatsApp.exe", "heard_as": ["whats app", "whatsapp web", "wa"]},
+  "telegram": {"launch": "telegram:", "process": "Telegram.exe", "heard_as": ["tele gram"]},
+  "zoom": {"process": "Zoom.exe"},
+  "teams": {"process": "ms-teams.exe", "heard_as": ["microsoft teams"]},
+
+  "word": {"launch": "winword", "process": "WINWORD.EXE", "heard_as": ["microsoft word"]},
+  "excel": {"launch": "excel", "process": "EXCEL.EXE", "heard_as": ["microsoft excel"]},
+  "powerpoint": {"launch": "powerpnt", "process": "POWERPNT.EXE", "heard_as": ["microsoft powerpoint"]},
+  "outlook": {"launch": "outlook", "process": "OUTLOOK.EXE"},
+  "gmail": {"launch": "https://mail.google.com", "heard_as": ["google mail", "mail", "inbox", "my email"]},
+  "google calendar": {"launch": "https://calendar.google.com", "heard_as": ["calendar", "google cal", "gcal", "my calendar"]},
+  "youtube": {"launch": "https://youtube.com", "heard_as": ["you tube"]}
+}

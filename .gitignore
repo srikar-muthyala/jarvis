@@ -1,0 +1,51 @@
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Secrets & Personal Configuration
+.env
+credentials.json
+token.json
+.daily_briefing.json
+tasks.json
+preferences.json
+
+# Node & Frontend Dependencies
+node_modules/
+*/node_modules/
+.npm/
+
+# Rust / Tauri Build Artifacts
+target/
+src-tauri/target/
+*/src-tauri/target/
+
+# Python Bytecode & Cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Audio / Temporary Files & Dev Previews
+*.mp3
+*.wav
+*.tmp
+temp/
+tmp/
+test_*.png
+test_*.ps
+preview_*.png
+render_preview.py
+
+# Editor & System Files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
