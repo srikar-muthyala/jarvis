@@ -12,16 +12,6 @@ token.json
 tasks.json
 preferences.json
 
-# Node & Frontend Dependencies
-node_modules/
-*/node_modules/
-.npm/
-
-# Rust / Tauri Build Artifacts
-target/
-src-tauri/target/
-*/src-tauri/target/
-
 # Python Bytecode & Cache
 __pycache__/
 *.py[cod]

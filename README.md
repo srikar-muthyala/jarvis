@@ -250,8 +250,7 @@ If you prefer custom zero-shot voice-cloned speech:
 
 | Mode | Windows Command | Linux Command | Description |
 | :--- | :--- | :--- | :--- |
-| **Modern Dynamic Island (React/Tauri)** | Double-click `start_ui.bat` | — | Transparent floating React desktop widget with spring physics & live telemetry. |
-| **Classic Dynamic Island** | Double-click `widget.bat` | `./widget.sh` | 60 FPS floating desktop notch, vector mascots, typing, and hotkeys. |
+| **Dynamic Island (Recommended)** | Double-click `widget.bat` | `./widget.sh` | 60 FPS floating desktop notch with Euler spring physics, live audio waveforms, and hotkeys. |
 | **Always-Listening Mode** | Double-click `run.bat` | `./run.sh` | Hands-free wake word (*"Hey Jarvis..."*). |
 | **Interactive Terminal Chat** | Double-click `chat.bat` | `./chat.sh` | Silent or spoken interactive conversation in terminal. |
 | **Push-to-Talk (PTT)** | `python jarvis.py --ptt` | `python3 jarvis.py --ptt` | Speak while holding <kbd>Right Ctrl</kbd>. |

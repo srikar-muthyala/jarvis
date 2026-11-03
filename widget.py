@@ -254,10 +254,18 @@ class JarvisIslandWidget:
         self.target_h = float(self.H_COMPACT)
         self._animating = False
         self._is_expanding = True
-        self._anim_start_time = 0.0
-        self._anim_duration = 0.30
-        self._anim_start_w = float(self.W_COMPACT)
-        self._anim_start_h = float(self.H_COMPACT)
+
+        # Euler Spring Physics Simulation (Signature organic Apple / Nixi bounce)
+        # F = -k*(x - target) - c*v  (where k = 290.0, c = 26.0 gives damping ratio ~0.76)
+        self.vel_w = 0.0
+        self.vel_h = 0.0
+        self.spring_k = 290.0
+        self.spring_c = 26.0
+        self._last_tick_time = time.perf_counter()
+
+        # Dynamic Audio Waveform & Micro-Interactions
+        self._smooth_audio_level = 0.0
+        self._hover_chip: str | None = None
 
         # State
         self.status_label = "Ready"
@@ -410,10 +418,13 @@ class JarvisIslandWidget:
         # 1. Background image
         self.item_bg = self.canvas.create_image(0, 0, anchor="nw")
 
-        # 2. Compact Notch Mascot & Title
+        # 2. Compact Notch Mascot, Title & Dynamic Audio Waveform
         self.item_compact_robo = self.canvas.create_image(0, 0, tags="btn_notch")
         self.item_compact_title = self.canvas.create_text(0, 0, text="J.A.R.V.I.S.", font=("Segoe UI", 9, "bold"), fill="#f5f5f5", state="hidden", tags="btn_notch")
         self.item_compact_status = self.canvas.create_text(0, 0, text="● Ready", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden", tags="btn_notch")
+        self.item_wave_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#f43f5e", state="hidden")
+        self.item_wave_bar2 = self.canvas.create_polygon(0, 0, 0, 0, fill="#f43f5e", state="hidden")
+        self.item_wave_bar3 = self.canvas.create_polygon(0, 0, 0, 0, fill="#f43f5e", state="hidden")
 
         # 3. Top Header Bar (Expanded Mode)
         self.item_header_logo = self.canvas.create_text(18, 15, anchor="w", text="J.A.R.V.I.S.", font=("Segoe UI", 8, "bold"), fill="#737373", state="hidden")
@@ -556,28 +567,31 @@ class JarvisIslandWidget:
             self._recompute_target_size()
 
     def _start_transition(self, target_w: float, target_h: float, is_expanding: bool | None = None):
-        if abs(self.cur_w - target_w) < 1.0 and abs(self.cur_h - target_h) < 1.0:
+        if abs(self.cur_w - target_w) < 0.5 and abs(self.cur_h - target_h) < 0.5 and abs(self.vel_w) < 1.0 and abs(self.vel_h) < 1.0:
             self.cur_w = target_w
             self.cur_h = target_h
             self.target_w = target_w
             self.target_h = target_h
+            self.vel_w = 0.0
+            self.vel_h = 0.0
             self._animating = False
             return
-        self._anim_start_time = time.perf_counter()
-        self._anim_start_w = self.cur_w
-        self._anim_start_h = self.cur_h
         self.target_w = target_w
         self.target_h = target_h
         self._is_expanding = (target_w > self.cur_w) if is_expanding is None else is_expanding
-        self._anim_duration = 0.30 if self._is_expanding else 0.22
         self._animating = True
+        self._last_tick_time = time.perf_counter()
 
     def _recompute_target_size(self):
         has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None))
         if not self.expanded:
-            tw = float(self.W_COMPACT)
+            # If listening in compact mode, spring open into a wider listening pill (96px)
+            if self.is_listening:
+                tw = 96.0
+            else:
+                tw = float(self.W_COMPACT)
             th = float(self.H_COMPACT)
-            expanding = False
+            expanding = self.is_listening
         else:
             tw = float(self.W_EXPANDED)
             base_h = float(self.H_EXPANDED)
@@ -662,10 +676,15 @@ class JarvisIslandWidget:
         else:
             if (island_x + w - 36 <= x <= island_x + w - 6) and (4 <= y <= 24):
                 is_clickable = True
+                self._hover_chip = None
             elif self.chip_approve_bbox and (self.chip_approve_bbox[0] <= x <= self.chip_approve_bbox[2] and self.chip_approve_bbox[1] <= y <= self.chip_approve_bbox[3]):
                 is_clickable = True
+                self._hover_chip = "approve"
             elif self.chip_deny_bbox and (self.chip_deny_bbox[0] <= x <= self.chip_deny_bbox[2] and self.chip_deny_bbox[1] <= y <= self.chip_deny_bbox[3]):
                 is_clickable = True
+                self._hover_chip = "deny"
+            else:
+                self._hover_chip = None
         self.canvas.config(cursor="hand2" if is_clickable else "")
 
     def set_tool_badge(self, name: str | None):
@@ -937,31 +956,47 @@ class JarvisIslandWidget:
         try:
             self._process_ui_queue()
 
-            # Advance animation phase for live smooth pulsation & lerping
+            # Advance animation phase and sample time step dt
+            now = time.perf_counter()
+            dt = min(0.032, max(0.001, now - getattr(self, "_last_tick_time", now)))
+            self._last_tick_time = now
+
             self._anim_phase += 0.06
             self._cur_cpu_pct += (self._target_cpu_pct - self._cur_cpu_pct) * 0.12
             self._cur_ram_pct += (self._target_ram_pct - self._cur_ram_pct) * 0.12
+
+            # Smooth live audio level tracking for waveform visualizer
+            try:
+                import audio
+                raw_level = getattr(audio, "LATEST_AUDIO_LEVEL", 0.0)
+            except Exception:
+                raw_level = 0.0
+            self._smooth_audio_level += (raw_level - self._smooth_audio_level) * 0.35
 
             # Smooth response streaming reveal
             self._update_reply_stream()
 
             if getattr(self, "_animating", False):
-                elapsed = time.perf_counter() - self._anim_start_time
-                dur = self._anim_duration if self._anim_duration > 0 else 0.26
-                t = min(1.0, elapsed / dur)
+                # Euler Spring Physics Simulation (signature organic Apple / Nixi bounce):
+                # F = -k * (x - target) - c * v
+                # a = F (with normalized mass m = 1.0)
+                # v += a * dt
+                # x += v * dt
+                force_w = -self.spring_k * (self.cur_w - self.target_w) - self.spring_c * self.vel_w
+                self.vel_w += force_w * dt
+                self.cur_w += self.vel_w * dt
 
-                # Native Windows 11 Fluid Curve Easing (no window resizing, pure transform)
-                if getattr(self, "_is_expanding", True):
-                    p = EASE_EXPAND(t)
-                else:
-                    p = EASE_COLLAPSE(t)
+                force_h = -self.spring_k * (self.cur_h - self.target_h) - self.spring_c * self.vel_h
+                self.vel_h += force_h * dt
+                self.cur_h += self.vel_h * dt
 
-                self.cur_w = self._anim_start_w + (self.target_w - self._anim_start_w) * p
-                self.cur_h = self._anim_start_h + (self.target_h - self._anim_start_h) * p
-
-                if t >= 1.0:
+                # Settle condition: low displacement and low velocity
+                if (abs(self.cur_w - self.target_w) < 0.6 and abs(self.vel_w) < 1.5 and
+                    abs(self.cur_h - self.target_h) < 0.6 and abs(self.vel_h) < 1.5):
                     self.cur_w = self.target_w
                     self.cur_h = self.target_h
+                    self.vel_w = 0.0
+                    self.vel_h = 0.0
                     self._animating = False
 
             self.telemetry_tick += 1
@@ -1008,13 +1043,41 @@ class JarvisIslandWidget:
         # ----------------------------------------------------------------------
         # COMPACT NOTCH MODE (Docked at top bezel)
         # ----------------------------------------------------------------------
-        if not self.expanded and w <= self.W_COMPACT + 4:
+        if not self.expanded and w <= 120:
             self.input_frame.place_forget()
             self._hide_expanded_items()
 
             robo_img = self.robo_faces_compact.get(mood, self.robo_faces_compact["online"])
             self.canvas.itemconfig(self.item_compact_robo, image=robo_img, state="normal")
-            self.canvas.coords(self.item_compact_robo, island_x + w / 2, island_y + h / 2)
+
+            if self.is_listening and w > self.W_COMPACT + 8:
+                # Dynamic Listening Pill: Mascot on left, animated Siri waveform on right
+                self.canvas.coords(self.item_compact_robo, island_x + 22, island_y + h / 2)
+
+                cy = island_y + h / 2
+                bx = island_x + 50.0
+                level = min(1.0, max(0.08, self._smooth_audio_level * 180.0))
+
+                h1 = max(4.0, min(22.0, 6.0 + 12.0 * level * abs(math.sin(self._anim_phase * 4.0))))
+                h2 = max(6.0, min(26.0, 8.0 + 16.0 * level * abs(math.sin(self._anim_phase * 4.0 + 1.2))))
+                h3 = max(4.0, min(22.0, 6.0 + 12.0 * level * abs(math.sin(self._anim_phase * 4.0 + 2.4))))
+
+                pts_b1 = _rounded_rect_points(bx, cy - h1/2, bx + 3.5, cy + h1/2, r=1.5)
+                pts_b2 = _rounded_rect_points(bx + 7.5, cy - h2/2, bx + 11.0, cy + h2/2, r=1.5)
+                pts_b3 = _rounded_rect_points(bx + 15.0, cy - h3/2, bx + 18.5, cy + h3/2, r=1.5)
+
+                self.canvas.coords(self.item_wave_bar1, pts_b1)
+                self.canvas.coords(self.item_wave_bar2, pts_b2)
+                self.canvas.coords(self.item_wave_bar3, pts_b3)
+
+                for itm in (self.item_wave_bar1, self.item_wave_bar2, self.item_wave_bar3):
+                    self.canvas.itemconfig(itm, fill="#f43f5e", state="normal")
+            else:
+                self.canvas.coords(self.item_compact_robo, island_x + w / 2, island_y + h / 2)
+                self.canvas.itemconfig(self.item_wave_bar1, state="hidden")
+                self.canvas.itemconfig(self.item_wave_bar2, state="hidden")
+                self.canvas.itemconfig(self.item_wave_bar3, state="hidden")
+
             self.canvas.itemconfig(self.item_compact_title, state="hidden")
             self.canvas.itemconfig(self.item_compact_status, state="hidden")
             return
@@ -1107,17 +1170,24 @@ class JarvisIslandWidget:
             self.chip_approve_bbox = (int(x1_app), int(chip_y), int(x2_app), int(chip_y + chip_h))
             self.chip_deny_bbox = (int(x1_den), int(chip_y), int(x2_den), int(chip_y + chip_h))
 
-            pts_app = _rounded_rect_points(x1_app, chip_y, x2_app, chip_y + chip_h, r=8)
+            # Reactive 3D hover lift micro-interaction on action chips
+            lift_app = 2.0 if getattr(self, "_hover_chip", None) == "approve" else 0.0
+            pts_app = _rounded_rect_points(x1_app, chip_y - lift_app, x2_app, chip_y + chip_h - lift_app, r=8)
             self.canvas.coords(self.item_chip_approve_bg, pts_app)
-            self.canvas.coords(self.item_chip_approve_text, (x1_app + x2_app) / 2, chip_y + chip_h / 2)
+            self.canvas.coords(self.item_chip_approve_text, (x1_app + x2_app) / 2, chip_y + chip_h / 2 - lift_app)
+            app_fill = "#059669" if lift_app > 0 else "#262626"
+            app_outline = "#34d399" if lift_app > 0 else "#525252"
+            self.canvas.itemconfig(self.item_chip_approve_bg, fill=app_fill, outline=app_outline, state="normal")
             self.canvas.itemconfig(self.item_chip_approve_text, text=app_lbl, state="normal")
-            self.canvas.itemconfig(self.item_chip_approve_bg, state="normal")
 
-            pts_den = _rounded_rect_points(x1_den, chip_y, x2_den, chip_y + chip_h, r=8)
+            lift_den = 2.0 if getattr(self, "_hover_chip", None) == "deny" else 0.0
+            pts_den = _rounded_rect_points(x1_den, chip_y - lift_den, x2_den, chip_y + chip_h - lift_den, r=8)
             self.canvas.coords(self.item_chip_deny_bg, pts_den)
-            self.canvas.coords(self.item_chip_deny_text, (x1_den + x2_den) / 2, chip_y + chip_h / 2)
+            self.canvas.coords(self.item_chip_deny_text, (x1_den + x2_den) / 2, chip_y + chip_h / 2 - lift_den)
+            den_fill = "#991b1b" if lift_den > 0 else "#171717"
+            den_outline = "#f87171" if lift_den > 0 else "#333333"
+            self.canvas.itemconfig(self.item_chip_deny_bg, fill=den_fill, outline=den_outline, state="normal")
             self.canvas.itemconfig(self.item_chip_deny_text, text=den_lbl, state="normal")
-            self.canvas.itemconfig(self.item_chip_deny_bg, state="normal")
         else:
             self.canvas.itemconfig(self.item_chip_approve_bg, state="hidden")
             self.canvas.itemconfig(self.item_chip_approve_text, state="hidden")
@@ -1317,6 +1387,9 @@ class JarvisIslandWidget:
         self.canvas.itemconfig(self.item_ram_lbl, state="hidden")
         self.canvas.itemconfig(self.item_ram_track, state="hidden")
         self.canvas.itemconfig(self.item_ram_fill, state="hidden")
+        self.canvas.itemconfig(self.item_wave_bar1, state="hidden")
+        self.canvas.itemconfig(self.item_wave_bar2, state="hidden")
+        self.canvas.itemconfig(self.item_wave_bar3, state="hidden")
         self.chip_approve_bbox = None
         self.chip_deny_bbox = None
 
