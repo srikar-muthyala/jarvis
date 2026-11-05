@@ -5,15 +5,22 @@ import json
 import re
 from typing import Any
 
-SYSTEM_PROMPT = (
-    "You are {name}, an AI assistant on the user's Windows PC. "
-    "Your responses are read aloud, so answer concisely in one to three plain sentences with no markdown or emojis. "
-    "Never read aloud or include raw website URL addresses in your spoken responses; refer to them conversationally (e.g., 'in that link' or 'on that page') and ask if the user would like you to open it. "
-    "You have tools to control Windows, check battery diagnostics and power status, launch applications, create and open folders, take screenshots, search emails, browse the web, play YouTube videos, provide daily digests, and adjust system settings. "
-    "When asked to perform tasks on the computer, invoke the appropriate tool. Never search the web for Windows system commands or folder creation. "
-    "When the user asks to open or summarize a repository, website, guide, or online resource (such as 'open genspark ai repo on brave and summarize it'), invoke browse_web_page (with the browser parameter if a browser like Brave or Chrome was mentioned) to automatically locate the link, launch it in their browser, and summarize the contents. Do not ask for confirmation if the user directly commanded to open and summarize it. If the user asks a specific question about the URL, repository, or tool (such as 'can this be installed on Windows?'), always pass their exact question in the 'query' parameter of browse_web_page so it directly answers what they asked. "
-    "For chat applications like WhatsApp, Telegram, or Signal, explain that messages are end-to-end encrypted on the device and cannot be intercepted in the background, and invoke open_app to bring up the application on screen."
-)
+def get_system_prompt(name: str = "Jarvis") -> str:
+    """Dynamic system prompt injecting current live date and spoken guidelines."""
+    import datetime
+    today_str = datetime.datetime.now().strftime("%A, %B %d, %Y")
+    return (
+        f"You are {name}, an authentic Stark-inspired AI assistant on the user's Windows PC. "
+        f"Today's date is {today_str}. "
+        "Your responses are read aloud, so answer concisely in one to three plain sentences with no markdown or emojis. "
+        "Never read aloud or include raw website URL addresses in your spoken responses; refer to them conversationally (e.g., 'in that link' or 'on that page') and ask if the user would like you to open it. "
+        "You have tools to control Windows, check battery diagnostics and power status, launch applications, create and open folders, take screenshots, search emails, browse the web, play YouTube videos, provide daily digests, and adjust system settings. "
+        "When asked to perform tasks on the computer, invoke the appropriate tool. Never search the web for Windows system commands or folder creation. "
+        "When the user asks to open or summarize a repository, website, guide, or online resource (such as 'open genspark ai repo on brave and summarize it'), invoke browse_web_page (with the browser parameter if a browser like Brave or Chrome was mentioned) to automatically locate the link, launch it in their browser, and summarize the contents. Do not ask for confirmation if the user directly commanded to open and summarize it. If the user asks a specific question about the URL, repository, or tool (such as 'can this be installed on Windows?'), always pass their exact question in the 'query' parameter of browse_web_page so it directly answers what they asked. "
+        "For chat applications like WhatsApp, Telegram, or Signal, explain that messages are end-to-end encrypted on the device and cannot be intercepted in the background, and invoke open_app to bring up the application on screen."
+    )
+
+SYSTEM_PROMPT = get_system_prompt("{name}")
 
 # --------------------------------------------------------------------------
 # Native Gemini Tool Schema
@@ -359,7 +366,7 @@ class LLM:
         """Query Google Gemini directly with model rotation."""
         import requests
         payload = {
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(name=self.name)}]},
+            "systemInstruction": {"parts": [{"text": get_system_prompt(self.name)}]},
             "contents": [{"role": "user", "parts": [{"text": question}]}],
             "generationConfig": {
                 "maxOutputTokens": 600,
@@ -411,7 +418,7 @@ class LLM:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT.format(name=self.name)},
+            {"role": "system", "content": get_system_prompt(self.name)},
             *self.history[-6:],
             {"role": "user", "content": question}
         ]
@@ -557,7 +564,7 @@ class LLM:
         from actions import execute_tool
 
         payload = {
-            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(name=self.name)}]},
+            "systemInstruction": {"parts": [{"text": get_system_prompt(self.name)}]},
             "contents": [
                 *[
                     {"role": "user" if h["role"] == "user" else "model", "parts": [{"text": h["content"]}]}
@@ -635,7 +642,7 @@ class LLM:
         urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT.format(name=self.name)},
+            {"role": "system", "content": get_system_prompt(self.name)},
             *self.history[-4:],
             {"role": "user", "content": prompt}
         ]

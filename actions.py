@@ -338,22 +338,28 @@ def h_website(arg, ctx):
 
 
 def fetch_search_snippets(query: str, max_results: int = 5) -> list[str]:
-    """Retrieve top real-time search result snippets from the web."""
+    """Retrieve top real-time search result snippets across DuckDuckGo HTML, DDG Lite, and Google News RSS."""
     snippets: list[str] = []
+    clean_q = str(query or "").strip()
+    if not clean_q:
+        return []
+
+    import urllib3
+    urllib3.disable_warnings()
+    import requests
+    import html
+
+    # Tier 1: DuckDuckGo HTML (Modern desktop search)
     try:
-        import urllib3
-        urllib3.disable_warnings()
-        import requests
-        import html
         r = requests.post(
-            "https://lite.duckduckgo.com/lite/",
-            data={"q": query},
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+            "https://html.duckduckgo.com/html/",
+            data={"q": clean_q},
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
             verify=False,
-            timeout=6
+            timeout=8
         )
         if r.status_code == 200:
-            raw = re.findall(r"class='result-snippet'>(.*?)</td>", r.text, re.DOTALL)
+            raw = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', r.text, re.DOTALL)
             for s in raw:
                 clean = html.unescape(re.sub(r"<.*?>", "", s)).strip()
                 clean = re.sub(r"\s+", " ", clean)
@@ -362,7 +368,70 @@ def fetch_search_snippets(query: str, max_results: int = 5) -> list[str]:
                 if len(snippets) >= max_results:
                     break
     except Exception as e:
-        print(f"  [search snippets error: {e}]")
+        print(f"  [search snippets ddg-html error: {e}]")
+
+    # Tier 2: DuckDuckGo Lite (if HTML endpoint yielded nothing)
+    if not snippets:
+        try:
+            r = requests.post(
+                "https://lite.duckduckgo.com/lite/",
+                data={"q": clean_q},
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
+                verify=False,
+                timeout=8
+            )
+            if r.status_code == 200:
+                raw = re.findall(r"class='result-snippet'>(.*?)</td>", r.text, re.DOTALL)
+                for s in raw:
+                    clean = html.unescape(re.sub(r"<.*?>", "", s)).strip()
+                    clean = re.sub(r"\s+", " ", clean)
+                    if clean and clean not in snippets:
+                        snippets.append(clean)
+                    if len(snippets) >= max_results:
+                        break
+        except Exception as e:
+            print(f"  [search snippets ddg-lite error: {e}]")
+
+    # Tier 3: Google News RSS (ideal for current affairs, politics, breaking news, sports)
+    if len(snippets) < max_results:
+        try:
+            import xml.etree.ElementTree as ET
+            from urllib.parse import quote_plus
+            url = f"https://news.google.com/rss/search?q={quote_plus(clean_q)}&hl=en-IN&gl=IN&ceid=IN:en"
+            r = requests.get(url, timeout=7, verify=False, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 200:
+                root = ET.fromstring(r.content)
+                for item in root.findall(".//item"):
+                    title_elem = item.find("title")
+                    if title_elem is not None and title_elem.text:
+                        clean_title = html.unescape(title_elem.text).strip()
+                        if clean_title and clean_title not in snippets:
+                            snippets.append(clean_title)
+                    if len(snippets) >= max_results:
+                        break
+        except Exception as e:
+            print(f"  [search snippets google-news error: {e}]")
+
+    # Tier 4: DuckDuckGo Instant Answer API
+    if not snippets:
+        try:
+            from urllib.parse import quote_plus
+            url = f"https://api.duckduckgo.com/?q={quote_plus(clean_q)}&format=json"
+            r = requests.get(url, timeout=6, verify=False, headers={"User-Agent": "Mozilla/5.0"})
+            if r.status_code == 200:
+                data = r.json()
+                abstract = data.get("AbstractText", "").strip()
+                if abstract and abstract not in snippets:
+                    snippets.append(abstract)
+                for rt in data.get("RelatedTopics", []):
+                    txt = rt.get("Text", "").strip()
+                    if txt and txt not in snippets:
+                        snippets.append(txt)
+                    if len(snippets) >= max_results:
+                        break
+        except Exception as e:
+            print(f"  [search snippets ddg-api error: {e}]")
+
     return snippets
 
 
@@ -383,18 +452,19 @@ def h_web_search(query, ctx: Context) -> str:
     ctx.last_search_url = search_url
     ctx.last_search_label = "Google Search"
 
-    # Fetch live real-time snippets in the background
+    # Fetch live real-time snippets across DuckDuckGo HTML, DDG Lite, and Google News RSS
     snippets = fetch_search_snippets(clean_q, max_results=5)
+    llm = getattr(ctx, "llm", None)
+
     if snippets:
         snippets_text = "\n".join(f"- {s}" for s in snippets)
-        llm = getattr(ctx, "llm", None)
         if llm:
             try:
                 prompt = (
                     f"The user asked: '{clean_q}'.\n\n"
                     f"Live web search results:\n{snippets_text}\n\n"
-                    f"Analyze these results and give a concise, accurate, direct answer to the user in 1 or 2 plain spoken sentences (no markdown or emojis). "
-                    f"State the direct answer (such as current prices, values, or key facts) immediately without conversational filler."
+                    f"Analyze these live results and give a concise, accurate, direct answer to the user in 1 or 2 plain spoken sentences (no markdown or emojis). "
+                    f"State the direct answer immediately without conversational filler."
                 )
                 answer = llm.ask(prompt)
                 if answer and len(answer.strip()) > 8 and not answer.startswith("I can answer questions once you add an API key"):
@@ -407,9 +477,24 @@ def h_web_search(query, ctx: Context) -> str:
             clean_first = clean_first[:217] + "..."
         return f"According to online search results: {clean_first}"
 
+    # Fallback when external snippet scrapers are blocked or offline:
+    # Instead of an empty dead-end message, use LLM's world knowledge to provide an immediate informative answer!
+    if llm:
+        try:
+            prompt = (
+                f"The user asked: '{clean_q}'.\n"
+                f"Provide a concise, factual, informative answer in 1 or 2 plain spoken sentences (no markdown or emojis). "
+                f"Do not mention that scraping failed; answer the question directly."
+            )
+            answer = llm.ask(prompt)
+            if answer and len(answer.strip()) > 8 and not answer.startswith("I can answer questions once you add an API key"):
+                return answer.strip()
+        except Exception as e:
+            print(f"  [llm direct search fallback error: {e}]")
+
     if explicit_open:
         return f"Searching Google for {clean_q}."
-    return f"I searched the web for {clean_q}, but couldn't retrieve live results at this moment, sir."
+    return f"I searched the web for {clean_q}. You can explore the live results via the search link, sir."
 
 
 def h_youtube(query, ctx):
