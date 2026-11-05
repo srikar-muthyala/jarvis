@@ -268,7 +268,7 @@ GEMINI_TOOLS = [{
         },
         {
             "name": "get_daily_digest",
-            "description": "Provide a comprehensive daily briefing or morning digest covering Coimbatore weather, today's calendar schedule, and the latest 3 emails from inbox. ALWAYS use this tool whenever the user asks for a daily digest, morning briefing, briefing, or summary of their day.",
+            "description": "Provide a comprehensive daily briefing or morning digest covering local weather, today's calendar schedule, and the latest 3 emails from inbox. ALWAYS use this tool whenever the user asks for a daily digest, morning briefing, briefing, or summary of their day.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {}
@@ -276,11 +276,11 @@ GEMINI_TOOLS = [{
         },
         {
             "name": "get_weather",
-            "description": "Get current weather condition, temperature, feels-like, and humidity for a specified city (default: Coimbatore).",
+            "description": "Get current weather condition, temperature, feels-like, humidity, and chance of rain for a specified city or user's default configured location (from WEATHER_LOCATION in .env).",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {
-                    "city": {"type": "STRING", "description": "City name, e.g. 'Coimbatore', 'London', 'New York'. Defaults to 'Coimbatore'."}
+                    "city": {"type": "STRING", "description": "City name, e.g. 'Hyderabad', 'London', 'New York'. Leave empty or omit if user asks for general/local weather."}
                 }
             }
         },

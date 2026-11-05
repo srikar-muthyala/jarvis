@@ -142,6 +142,7 @@ Get your keys from the official portals below:
 | **Gmail IMAP Summaries** (Read Inbox) | Optional | [Google Account App Passwords](https://myaccount.google.com/apppasswords) | `EMAIL_APP_PASSWORD` |
 | **Google Calendar iCal Sync** | Optional | [Google Calendar Settings](https://calendar.google.com/calendar/r/settings) | `GOOGLE_CALENDAR_URL` |
 | **Google Tasks OAuth 2.0** | Optional | [Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials) | `credentials.json` |
+| **Default Weather Location** | Optional | Any city name (e.g. Hyderabad, London, New York) | `WEATHER_LOCATION` |
 
 ```ini
 # ==============================================================================
@@ -186,12 +187,16 @@ EMAIL_IMAP_SERVER=imap.gmail.com
 # Paste your Secret iCal format address from Google Calendar Settings
 GOOGLE_CALENDAR_URL=https://calendar.google.com/calendar/ical/your_email/private-xxxx/basic.ics
 
-# --- 6. Speech Recognition (Whisper) ---
+# --- 6. Default Weather Location (Optional) ---
+# City or region for weather queries and morning briefings (defaults to Coimbatore if blank)
+WEATHER_LOCATION=Hyderabad
+
+# --- 7. Speech Recognition (Whisper) ---
 WHISPER_MODEL=base.en
 MIC_DEVICE=
 MIC_THRESHOLD=
 
-# --- 7. Floating Dynamic Island Hotkey ---
+# --- 8. Floating Dynamic Island Hotkey ---
 WIDGET_HOTKEY=alt+space
 ```
 

@@ -1628,14 +1628,26 @@ def h_deep_research(topic: str, ctx: Context) -> str:
     return spoken
 
 
-def fetch_weather(city: str = "Coimbatore") -> str:
+def get_default_location() -> str:
+    """Get user's configured default weather location from environment variables."""
+    import os
+    loc = (
+        os.environ.get("WEATHER_LOCATION", "").strip()
+        or os.environ.get("WEATHER_CITY", "").strip()
+        or os.environ.get("LOCATION", "").strip()
+    )
+    return loc or "Coimbatore"
+
+
+def fetch_weather(city: str | None = None) -> str:
     """Fetch live weather for city via wttr.in with Open-Meteo fallback, including chance of rain."""
     import requests
     import urllib3
     import datetime
     urllib3.disable_warnings()
 
-    city_clean = (city or "Coimbatore").strip()
+    default_city = get_default_location()
+    city_clean = (city or default_city).strip()
     try:
         r = requests.get(f"https://wttr.in/{city_clean}?format=j1", timeout=6, verify=False)
         if r.status_code == 200:
@@ -2072,13 +2084,14 @@ def fetch_calendar_events(target_date: datetime.date | None = None) -> list[str]
     return events
 
 
-def h_weather(arg: dict | str, ctx: Context) -> str:
-    """Report current weather for Coimbatore or requested city."""
-    city = "Coimbatore"
+def h_weather(arg: dict | str | None, ctx: Context) -> str:
+    """Report current weather for user's configured location or requested city."""
+    default_city = get_default_location()
+    city = default_city
     if isinstance(arg, str) and arg.strip():
         city = arg.strip()
     elif isinstance(arg, dict):
-        city = arg.get("city") or arg.get("location") or "Coimbatore"
+        city = arg.get("city") or arg.get("location") or default_city
     ctx.do(f"fetch weather for {city}")
     return fetch_weather(city)
 
@@ -2564,7 +2577,7 @@ def h_daily_digest(arg: dict | str, ctx: Context) -> str:
     greeting_prefix = "Certainly, sir. Here is your daily digest." if skip_greeting else f"{time_greeting} Here is your daily digest."
 
     # 1. Weather in Coimbatore
-    weather_summary = fetch_weather("Coimbatore")
+    weather_summary = fetch_weather()
 
     # 2. Calendar and Tasks for today
     cal_events = fetch_calendar_events() or []
@@ -2776,7 +2789,7 @@ def execute_tool(tool_name: str, args: dict, ctx: Context) -> str:
             return h_daily_digest(args, ctx)
 
         elif tool_name in ("weather", "get_weather"):
-            city = args.get("city") or args.get("location") or "Coimbatore"
+            city = args.get("city") or args.get("location") or get_default_location()
             return h_weather(city, ctx)
 
         elif tool_name in ("calendar", "get_calendar", "get_calendar_events"):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -549,7 +550,13 @@ def _parse_single(t: str, names) -> Action | None:
         return Action("daily_digest")
     m = RE_WEATHER.match(t)
     if m:
-        city = (m.group("city1") or m.group("city2") or "Coimbatore").strip()
+        def_loc = (
+            os.environ.get("WEATHER_LOCATION", "").strip()
+            or os.environ.get("WEATHER_CITY", "").strip()
+            or os.environ.get("LOCATION", "").strip()
+            or "Coimbatore"
+        )
+        city = (m.group("city1") or m.group("city2") or def_loc).strip()
         return Action("weather", city)
     m_cal = RE_CALENDAR.match(t)
     if m_cal:
