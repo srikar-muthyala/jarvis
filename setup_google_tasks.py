@@ -11,7 +11,10 @@ from urllib.parse import urlparse, parse_qs
 HERE = Path(__file__).resolve().parent
 CREDENTIALS_FILE = HERE / "credentials.json"
 TOKEN_FILE = HERE / "token.json"
-SCOPES = ["https://www.googleapis.com/auth/tasks.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/tasks.readonly",
+    "https://www.googleapis.com/auth/calendar.readonly"
+]
 
 auth_code = None
 server_error = None

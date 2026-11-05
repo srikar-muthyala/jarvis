@@ -58,8 +58,9 @@ class Assistant:
         self.pending_url: str | None = None
         self.pending_label: str | None = None
         self.pending_briefing: bool = False
+        self.pending_memory_cleanup: bool = False
         if not dry_run:
-            self.monitor = ProactiveMonitor(self.speaker)
+            self.monitor = ProactiveMonitor(self.speaker, asst=self)
             self.monitor.start()
         else:
             self.monitor = None
@@ -101,6 +102,12 @@ class Assistant:
         """Speak reply and scan for documentation URLs to offer opening them."""
         if not reply:
             return
+
+        # Attach background search URL as an interactive button on the widget without vocal filler
+        if getattr(self.ctx, "last_search_url", None):
+            self.pending_url = self.ctx.last_search_url
+            self.pending_label = getattr(self.ctx, "last_search_label", "Google Search") or "Google Search"
+            self.ctx.last_search_url = None
 
         # If Jarvis is already actively opening/launching something, do NOT prompt to open it
         if re.search(r"\b(?:opening|launching|navigating to|visiting|starting|opened|launched)\b", reply, re.IGNORECASE):
@@ -192,6 +199,31 @@ class Assistant:
                 return True
             else:
                 self.pending_briefing = False
+
+        # Check for pending memory cleanup confirmation
+        if getattr(self, "pending_memory_cleanup", False):
+            raw_t = text.lower().strip()
+            is_yes = bool(re.match(
+                r"^(?:yes|yeah|yep|sure|ok|okay|please|yes please|please do|do it|bring it down|get it down|optimize|clean it|fix it|go ahead|proceed|yup|affirmative|yes please do|free up memory|clear it|yes do it)$",
+                raw_t
+            ))
+            is_no = bool(re.match(
+                r"^(?:no|nope|nah|cancel|never mind|don't|not now|later|no thanks|negative)$",
+                raw_t
+            ))
+
+            if is_yes:
+                self.pending_memory_cleanup = False
+                from actions import h_optimize_memory
+                reply = h_optimize_memory(None, self.ctx)
+                self._speak_reply(reply)
+                return True
+            elif is_no:
+                self.pending_memory_cleanup = False
+                self.speaker.speak("Understood, sir. Standing by.")
+                return True
+            else:
+                self.pending_memory_cleanup = False
 
         # Quick greetings - instant, polite, zero network latency
         if text in ("hey jarvis", "hi jarvis", "hello jarvis", "jarvis", "hello", "hi", "hey"):

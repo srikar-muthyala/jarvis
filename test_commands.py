@@ -9,6 +9,9 @@ def kinds(text):
 
 
 CASES = [
+    ("summarize this video https://www.youtube.com/watch?v=dQw4w9WgXcQ", [("youtube_summary", {"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ"})]),
+    ("tldr of https://youtu.be/dQw4w9WgXcQ", [("youtube_summary", {"url": "https://youtu.be/dQw4w9WgXcQ"})]),
+    ("what is this video about https://www.youtube.com/shorts/dQw4w9WgXcQ", [("youtube_summary", {"url": "https://www.youtube.com/shorts/dQw4w9WgXcQ"})]),
     ("open chrome", [("open_app", "chrome")]),
     ("Open Spotify.", [("open_app", "spotify")]),
     ("open the settings app", [("open_app", "settings")]),
@@ -97,9 +100,14 @@ CASES = [
     ("weather in coimbatore", [("weather", "coimbatore")]),
     ("what's on my calendar today", [("calendar", None)]),
     ("check my calendar today", [("calendar", None)]),
+    ("whats on my calender tomorrow", [("calendar", {"date": "tomorrow"})]),
+    ("what's on my calendar tomorrow", [("calendar", {"date": "tomorrow"})]),
+    ("check my schedule on thursday", [("calendar", {"date": "thursday"})]),
+    ("calendar this week", [("calendar", {"date": "this week"})]),
     ("add task Night check-in at 8:45 PM", [("add_task", "night check-in at 8:45 pm")]),
     ("what are my tasks for today", [("list_tasks", None)]),
     ("check my tasks", [("list_tasks", None)]),
+    ("what are my tasks tomorrow", [("list_tasks", {"date": "tomorrow"})]),
     ("open the portal link that is mentioned in the email by isha foundation regarding support portal", [("open_email_link", {"query": "isha foundation regarding support portal"})]),
     ("jarvis open the portal link that is mentioned in the email by isha foundation regarding support portal", [("open_email_link", {"query": "isha foundation regarding support portal"})]),
     ("can you open the portal link that is mentioned in the email by isha foundation regarding support portal", [("open_email_link", {"query": "isha foundation regarding support portal"})]),

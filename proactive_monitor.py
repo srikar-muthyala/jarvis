@@ -11,7 +11,8 @@ import time
 class ProactiveMonitor:
     """Background sentinel monitoring battery, system health, and upcoming meetings."""
 
-    def __init__(self, speaker, check_interval: float = 30.0):
+    def __init__(self, speaker, check_interval: float = 30.0, asst=None):
+        self.asst = asst
         self.speaker = speaker
         self.check_interval = check_interval
         self._running = False
@@ -70,11 +71,14 @@ class ProactiveMonitor:
         try:
             import psutil
             mem = psutil.virtual_memory().percent
-            if mem > 93:
+            if mem >= 90:
                 if not self._high_load_alerted:
                     self._high_load_alerted = True
+                    if self.asst:
+                        self.asst.pending_memory_cleanup = True
                     self.speaker.speak(
-                        f"Notice, sir: system memory load is elevated at {int(mem)} percent."
+                        f"Notice, sir: system memory load is elevated at {int(mem)} percent. "
+                        "Would you like me to optimize memory and bring the load down?"
                     )
             elif mem < 80:
                 self._high_load_alerted = False

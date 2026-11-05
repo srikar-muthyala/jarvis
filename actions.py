@@ -367,24 +367,34 @@ def fetch_search_snippets(query: str, max_results: int = 5) -> list[str]:
 
 
 def h_web_search(query, ctx: Context) -> str:
-    url = "https://www.google.com/search?q=" + quote_plus(query)
-    ctx.do(f"open {url}", lambda: webbrowser.open(url))
+    clean_q = str(query or "").strip()
+    search_url = "https://www.google.com/search?q=" + quote_plus(clean_q)
+
+    # Check if user explicitly asked to launch or open the browser window
+    last_cmd = getattr(ctx, "last_query", "") or ""
+    explicit_open = bool(re.search(r"\b(?:open\s+(?:browser|chrome|edge|brave|firefox|google)|launch\s+browser)\b", last_cmd, re.IGNORECASE))
+    if explicit_open:
+        ctx.do(f"open {search_url}", lambda: webbrowser.open(search_url))
 
     if ctx.dry_run:
-        return f"[dry run] search: {query}"
+        return f"[dry run] search: {clean_q}"
 
-    # Fetch live real-time snippets from the web
-    snippets = fetch_search_snippets(query, max_results=5)
+    # Save search URL so Jarvis provides a one-click interactive widget button without opening tabs automatically
+    ctx.last_search_url = search_url
+    ctx.last_search_label = "Google Search"
+
+    # Fetch live real-time snippets in the background
+    snippets = fetch_search_snippets(clean_q, max_results=5)
     if snippets:
         snippets_text = "\n".join(f"- {s}" for s in snippets)
         llm = getattr(ctx, "llm", None)
         if llm:
             try:
                 prompt = (
-                    f"The user asked: '{query}'.\n\n"
+                    f"The user asked: '{clean_q}'.\n\n"
                     f"Live web search results:\n{snippets_text}\n\n"
                     f"Analyze these results and give a concise, accurate, direct answer to the user in 1 or 2 plain spoken sentences (no markdown or emojis). "
-                    f"State the direct answer (such as current prices, values, or key facts) immediately."
+                    f"State the direct answer (such as current prices, values, or key facts) immediately without conversational filler."
                 )
                 answer = llm.ask(prompt)
                 if answer and len(answer.strip()) > 8 and not answer.startswith("I can answer questions once you add an API key"):
@@ -392,13 +402,14 @@ def h_web_search(query, ctx: Context) -> str:
             except Exception as e:
                 print(f"  [llm search synthesis error: {e}]")
 
-        # Fallback if LLM unavailable: return the cleanest top snippet
         clean_first = snippets[0]
         if len(clean_first) > 220:
             clean_first = clean_first[:217] + "..."
         return f"According to online search results: {clean_first}"
 
-    return f"Searching Google for {query}."
+    if explicit_open:
+        return f"Searching Google for {clean_q}."
+    return f"I searched the web for {clean_q}, but couldn't retrieve live results at this moment, sir."
 
 
 def h_youtube(query, ctx):
@@ -656,26 +667,45 @@ def h_open_folder(arg: dict | str | None, ctx: Context) -> str:
         ctx.do(f"open folder {target}", lambda: subprocess.Popen(["explorer.exe", str(target)]))
         return "Opened your Desktop."
 
-    if fn in ("jarvis", "screenshots", "screenshot"):
+    fn_clean = fn.replace("\\", "/")
+
+    # Check for Documents/Jarvis or research dossier folder
+    if any(k in fn_clean for k in ("documents/jarvis", "documents jarvis", "jarvis documents", "research", "dossier")):
+        target = get_known_folder("documents") / "Jarvis"
+    elif any(k in fn_clean for k in ("pictures/jarvis", "pictures jarvis", "screenshots", "screenshot")):
         target = get_screenshot_dir()
-    elif fn in ("desktop", "pictures", "documents", "downloads", "music", "videos"):
-        target = get_known_folder(fn)
+    elif fn_clean in ("jarvis", "jarvis folder"):
+        doc_jarvis = get_known_folder("documents") / "Jarvis"
+        if ctx.last_created_folder and ctx.last_created_folder.exists() and ctx.last_created_folder.resolve() == doc_jarvis.resolve():
+            target = doc_jarvis
+        elif doc_jarvis.exists() and any(doc_jarvis.glob("research_*.md")):
+            target = doc_jarvis
+        else:
+            target = get_screenshot_dir()
+    elif fn_clean in ("desktop", "pictures", "documents", "downloads", "music", "videos"):
+        target = get_known_folder(fn_clean)
     else:
-        if ctx.last_created_folder and ctx.last_created_folder.name.lower() == fn:
+        slash_parts = fn_clean.split("/", 1)
+        space_parts = fn_clean.split(" ", 1)
+        if len(slash_parts) == 2 and slash_parts[0] in ("desktop", "pictures", "documents", "downloads", "music", "videos"):
+            target = get_known_folder(slash_parts[0]) / slash_parts[1]
+        elif len(space_parts) == 2 and space_parts[0] in ("desktop", "pictures", "documents", "downloads", "music", "videos"):
+            target = get_known_folder(space_parts[0]) / space_parts[1]
+        elif ctx.last_created_folder and ctx.last_created_folder.name.lower() == fn_clean:
             target = ctx.last_created_folder
         else:
             found = None
-            for base in ("desktop", "pictures", "documents", "downloads"):
-                cand = get_known_folder(base) / fn
+            for base in ("documents", "pictures", "desktop", "downloads"):
+                cand = get_known_folder(base) / fn_clean
                 if cand.exists():
                     found = cand
                     break
             if found:
                 target = found
             elif ctx.last_created_folder:
-                target = ctx.last_created_folder.parent / fn
+                target = ctx.last_created_folder.parent / fn_clean
             else:
-                target = get_known_folder("desktop") / fn
+                target = get_known_folder("documents") / fn_clean
 
     target.mkdir(parents=True, exist_ok=True)
     ctx.do(f"open folder {target}", lambda: subprocess.Popen(["explorer.exe", str(target)]))
@@ -783,6 +813,121 @@ def h_system_stats(category, ctx):
     except Exception as e:
         print(f"  [system stats error: {e}]")
         return f"Unable to retrieve complete system diagnostics: {e}"
+
+
+def h_optimize_memory(arg: dict | str | None, ctx: Context) -> str:
+    """Optimize system memory by flushing process working sets and reclaiming inactive RAM."""
+    if ctx.dry_run:
+        return "[dry run] optimize system memory"
+
+    try:
+        import psutil
+        import ctypes
+        import os
+        import gc
+
+        before = psutil.virtual_memory()
+        b_pct = int(round(before.percent))
+        b_used = before.used
+
+        PROCESS_QUERY_INFORMATION = 0x0400
+        PROCESS_SET_QUOTA = 0x0100
+
+        reclaimed_procs = 0
+        my_pid = os.getpid()
+
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                pid = proc.info['pid']
+                if pid <= 4 or pid == my_pid:
+                    continue
+                h = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_SET_QUOTA, False, pid)
+                if h:
+                    ctypes.windll.psapi.EmptyWorkingSet(h)
+                    ctypes.windll.kernel32.CloseHandle(h)
+                    reclaimed_procs += 1
+            except Exception:
+                pass
+
+        gc.collect()
+
+        after = psutil.virtual_memory()
+        a_pct = int(round(after.percent))
+        a_used = after.used
+        diff_bytes = max(0, b_used - a_used)
+        diff_mb = diff_bytes // (1024 * 1024)
+
+        agg = {}
+        for proc in psutil.process_iter(['name', 'memory_info']):
+            try:
+                m = proc.info['memory_info'].rss
+                n = proc.info['name']
+                if n and m > 80 * 1024 * 1024:
+                    clean_n = n[:-4] if n.lower().endswith(".exe") else n
+                    agg[clean_n] = agg.get(clean_n, 0) + m
+            except Exception:
+                pass
+
+        filtered_top = [(k, v) for k, v in agg.items() if k.lower() not in ("memcompression", "system", "registry", "svchost")]
+        top_sorted = sorted(filtered_top, key=lambda x: x[1], reverse=True)[:2]
+
+        top_desc = ""
+        if top_sorted:
+            top_parts = []
+            for name, mem_val in top_sorted:
+                gb = mem_val / (1024 ** 3)
+                if gb >= 1.0:
+                    top_parts.append(f"{name} using {gb:.1f} GB")
+                else:
+                    top_parts.append(f"{name} using {mem_val // (1024 * 1024)} MB")
+            top_desc = f" The largest active applications are {', and '.join(top_parts)}."
+
+        if diff_mb >= 1024:
+            savings_str = f"{diff_mb / 1024:.1f} gigabytes"
+        elif diff_mb >= 30:
+            savings_str = f"{diff_mb} megabytes"
+        else:
+            savings_str = None
+
+        if savings_str and b_pct > a_pct:
+            return (
+                f"Memory optimized, sir. Reclaimed {savings_str} of RAM across {reclaimed_procs} processes. "
+                f"Memory load dropped from {b_pct}% to {a_pct}%.{top_desc}"
+            )
+        elif savings_str:
+            return (
+                f"Memory optimized, sir. Reclaimed {savings_str} of RAM. "
+                f"System load is currently at {a_pct} percent.{top_desc}"
+            )
+        else:
+            return (
+                f"System working sets flushed, sir. System memory is currently at {a_pct} percent capacity.{top_desc}"
+            )
+    except Exception as e:
+        print(f"  [optimize memory error: {e}]")
+        return f"Unable to optimize memory at this time, sir: {e}"
+
+
+def h_autostart(arg: str | None, ctx: Context) -> str:
+    """Manage Jarvis Windows auto-boot on startup."""
+    from setup_autostart import enable_autostart, disable_autostart, is_autostart_enabled
+    a = str(arg or "status").lower().strip()
+    if a in ("enable", "on", "start", "true"):
+        ok = enable_autostart()
+        if ok:
+            return "Auto-boot has been enabled, sir. I will initialize automatically whenever your system boots."
+        return "I was unable to configure the Windows startup shortcut, sir."
+    elif a in ("disable", "off", "stop", "false"):
+        ok = disable_autostart()
+        if ok:
+            return "Auto-boot has been disabled, sir. I will no longer launch automatically on system boot."
+        return "I was unable to remove the Windows startup shortcut, sir."
+    else:
+        st = is_autostart_enabled()
+        if st:
+            return "Auto-boot is currently enabled, sir. I will launch automatically whenever Windows boots."
+        else:
+            return "Auto-boot is currently disabled, sir. You can tell me to enable auto start anytime."
 
 
 def h_battery_status(_, ctx):
@@ -1372,6 +1517,15 @@ def h_browse_page(arg: dict | str, ctx: Context) -> str:
     query = (arg.get("query") or "").strip()
     browser = (arg.get("browser") or "").strip()
 
+    # If the user included a question alongside the URL, preserve it
+    raw_cmd = getattr(ctx, "last_query", "") or ""
+    if not query and raw_cmd:
+        import re
+        cleaned_cmd = re.sub(r"https?://\S+", "", raw_cmd).strip()
+        cleaned_cmd = re.sub(r"^(?:please\s+|can\s+you\s+)?(?:browse|read|summarize|inspect|check\s+out|look\s+at)\s+(?:(?:the\s+)?(?:page|website|site|url|article|link|repo(?:sitory)?)\s+)?", "", cleaned_cmd, flags=re.IGNORECASE).strip()
+        if cleaned_cmd and len(cleaned_cmd) > 3:
+            query = cleaned_cmd
+
     if not raw_url:
         return "Please specify a URL or topic for me to browse, sir."
 
@@ -1466,7 +1620,11 @@ def h_deep_research(topic: str, ctx: Context) -> str:
     if not clean_topic:
         return "Please specify a research topic, sir."
 
-    spoken, _ = deep_research_topic(clean_topic, ctx)
+    spoken, file_path = deep_research_topic(clean_topic, ctx)
+    if file_path:
+        p = Path(file_path)
+        ctx.last_research_file = p
+        ctx.last_created_folder = p.parent
     return spoken
 
 
@@ -1532,8 +1690,207 @@ def fetch_weather(city: str = "Coimbatore") -> str:
 
 _CAL_CACHE: dict = {"time": 0.0, "events": []}
 
+def parse_target_date(raw=None) -> tuple:
+    """Parse flexible date references into (target_date, display_label, is_range)."""
+    import datetime
+    import re
 
-def fetch_calendar_events() -> list[str] | None:
+    today = datetime.date.today()
+    if raw is None:
+        return today, "today", False
+    if isinstance(raw, datetime.date):
+        if raw == today:
+            return raw, "today", False
+        elif raw == today + datetime.timedelta(days=1):
+            return raw, f"tomorrow ({raw.strftime('%A, %b %d')})", False
+        elif raw == today - datetime.timedelta(days=1):
+            return raw, f"yesterday ({raw.strftime('%A, %b %d')})", False
+        return raw, raw.strftime("%A, %b %d"), False
+    if isinstance(raw, dict):
+        raw = raw.get("date") or raw.get("day") or raw.get("target_date") or ""
+
+    text = str(raw).strip().lower()
+    if not text or text in ("today", "for today"):
+        return today, "today", False
+
+    # Check for range: week / upcoming
+    if any(k in text for k in ("this week", "next week", "upcoming", "next 7 days", "week")):
+        return today, "this week", True
+
+    if "day after tomorrow" in text:
+        target = today + datetime.timedelta(days=2)
+        return target, f"the day after tomorrow ({target.strftime('%A, %b %d')})", False
+
+    if "tomorrow" in text:
+        target = today + datetime.timedelta(days=1)
+        return target, f"tomorrow ({target.strftime('%A, %b %d')})", False
+
+    if "yesterday" in text:
+        target = today - datetime.timedelta(days=1)
+        return target, f"yesterday ({target.strftime('%A, %b %d')})", False
+
+    # Weekdays
+    weekdays = {
+        "monday": 0, "mon": 0,
+        "tuesday": 1, "tue": 1, "tues": 1,
+        "wednesday": 2, "wed": 2,
+        "thursday": 3, "thu": 3, "thur": 3, "thurs": 3,
+        "friday": 4, "fri": 4,
+        "saturday": 5, "sat": 5,
+        "sunday": 6, "sun": 6,
+    }
+    for w_name, w_idx in weekdays.items():
+        if re.search(r"\b" + w_name + r"\b", text):
+            diff = (w_idx - today.weekday()) % 7
+            if diff == 0:
+                diff = 7 if "next" in text else 0
+            elif "next" in text and diff < 7:
+                diff += 7
+            target = today + datetime.timedelta(days=diff)
+            if target == today:
+                return target, "today", False
+            if target == today + datetime.timedelta(days=1):
+                return target, f"tomorrow ({target.strftime('%A, %b %d')})", False
+            return target, target.strftime("%A, %b %d"), False
+
+    # Month names & date matching (e.g. "Nov 5", "November 5th", "5th Nov", "2026-11-05")
+    m_iso = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", text)
+    if m_iso:
+        try:
+            target = datetime.date(int(m_iso.group(1)), int(m_iso.group(2)), int(m_iso.group(3)))
+            if target == today:
+                return target, "today", False
+            if target == today + datetime.timedelta(days=1):
+                return target, f"tomorrow ({target.strftime('%A, %b %d')})", False
+            return target, target.strftime("%A, %b %d"), False
+        except Exception:
+            pass
+
+    months = {
+        "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+        "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+        "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9, "october": 10, "oct": 10,
+        "november": 11, "nov": 11, "december": 12, "dec": 12
+    }
+    for m_name, m_num in months.items():
+        m_match = re.search(r"\b" + m_name + r"\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s*,?\s*(\d{4}))?\b", text)
+        if not m_match:
+            m_match = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?" + m_name + r"(?:\s*,?\s*(\d{4}))?\b", text)
+        if m_match:
+            day_num = int(m_match.group(1) if m_match.group(1).isdigit() else m_match.group(2))
+            year_num = int(m_match.group(2)) if (m_match.lastindex >= 2 and m_match.group(2) and m_match.group(2).isdigit() and len(m_match.group(2)) == 4) else today.year
+            try:
+                target = datetime.date(year_num, m_num, day_num)
+                if target == today:
+                    return target, "today", False
+                if target == today + datetime.timedelta(days=1):
+                    return target, f"tomorrow ({target.strftime('%A, %b %d')})", False
+                return target, target.strftime("%A, %b %d"), False
+            except Exception:
+                pass
+
+    return today, "today", False
+
+
+
+def fetch_google_calendar_api(target_date=None) -> list[str] | None:
+    """Fetch active calendar events directly from Google Calendar API with zero caching delay.
+    Automatically queries the primary calendar and all user calendars in the account.
+    Returns list of formatted events, empty list if clear, or None if token not authorized or unavailable.
+    """
+    import os
+    import json
+    import re
+    import datetime
+    from pathlib import Path
+
+    token_path = Path(__file__).resolve().parent / "token.json"
+    if not token_path.exists():
+        return None
+
+    try:
+        from google.oauth2.credentials import Credentials
+        from google.auth.transport.requests import Request
+        from googleapiclient.discovery import build
+
+        token_data = json.loads(token_path.read_text(encoding="utf-8"))
+        creds = Credentials.from_authorized_user_info(token_data)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            token_path.write_text(creds.to_json(), encoding="utf-8")
+
+        service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+        today = datetime.date.today()
+        if target_date is None:
+            target_date = today
+
+        # Time bounds for the full target_date in local timezone
+        now_local = datetime.datetime.now()
+        now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        tz_offset = now_local - now_utc
+
+        start_local = datetime.datetime.combine(target_date, datetime.time.min)
+        end_local = datetime.datetime.combine(target_date, datetime.time.max)
+        start_utc = (start_local - tz_offset).isoformat() + "Z"
+        end_utc = (end_local - tz_offset).isoformat() + "Z"
+
+        cal_list_resp = service.calendarList().list().execute()
+        cal_ids = [c["id"] for c in cal_list_resp.get("items", []) if c.get("selected", True)]
+        if "primary" not in cal_ids:
+            cal_ids.insert(0, "primary")
+
+        events = []
+        seen = set()
+
+        for cid in cal_ids:
+            try:
+                events_result = service.events().list(
+                    calendarId=cid,
+                    timeMin=start_utc,
+                    timeMax=end_utc,
+                    singleEvents=True,
+                    orderBy="startTime",
+                    maxResults=50
+                ).execute()
+
+                for ev in events_result.get("items", []):
+                    summary = (ev.get("summary") or "").strip()
+                    if not summary or summary.lower() in seen:
+                        continue
+                    if re.match(r"^(?:\[task\]|task\s*:|\[todo\]|todo\s*:)\s*", summary, re.IGNORECASE):
+                        continue
+
+                    start = ev.get("start", {})
+                    if "dateTime" in start:
+                        dt_raw = start["dateTime"]
+                        dt_obj = datetime.datetime.fromisoformat(dt_raw)
+                        h_int = dt_obj.hour
+                        m_int = dt_obj.minute
+                        period = "AM" if h_int < 12 else "PM"
+                        disp_h = h_int if (1 <= h_int <= 12) else (12 if h_int == 0 else h_int - 12)
+                        time_str = f" at {disp_h}:{m_int:02d} {period}"
+                        events.append(f"{summary}{time_str}")
+                    else:
+                        events.append(f"{summary} (all day)")
+                    seen.add(summary.lower())
+            except Exception:
+                continue
+
+        return events
+    except Exception:
+        # If scope missing (e.g. 403 insufficient permissions), return None to fall back to iCal
+        return None
+
+
+def fetch_calendar_events(target_date: datetime.date | None = None) -> list[str] | None:
+    """Fetch calendar events from Google Calendar API (real-time) or iCal feed fallback.
+    Returns list of formatted events, empty list if clear, or None if unconfigured.
+    """
+    # 1. Try real-time Google Calendar API first (instant, 0 caching delay, all calendars)
+    api_events = fetch_google_calendar_api(target_date)
+    if api_events is not None:
+        return api_events
+
     """Fetch calendar events for today from Google Calendar iCal feed and Indian holidays.
     Always performs a live fetch without stale caching so newly added events are reflected immediately.
     Falls back to cached events only if the network request fails.
@@ -1556,7 +1913,9 @@ def fetch_calendar_events() -> list[str] | None:
     if indian_holidays_url not in calendar_urls:
         calendar_urls.append(indian_holidays_url)
 
-    today = datetime.date.today()
+    if target_date is None:
+        target_date = datetime.date.today()
+    today = target_date
     today_str = today.strftime("%Y%m%d")
     today_day_code = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"][today.weekday()]
     events = []
@@ -1734,7 +2093,7 @@ def normalize_title(text: str) -> str:
     return re.sub(r"\s+", " ", t)
 
 
-def fetch_google_tasks_api() -> list[str]:
+def fetch_google_tasks_api(target_date: datetime.date | None = None) -> list[str]:
     """Fetch active tasks for today directly from Google Tasks API if token.json exists."""
     import os
     import json
@@ -1760,7 +2119,10 @@ def fetch_google_tasks_api() -> list[str]:
 
         service = build("tasks", "v1", credentials=creds, cache_discovery=False)
         today = datetime.date.today()
-        today_str = today.strftime("%Y-%m-%d")
+        if target_date is None:
+            target_date = today
+        today_str = target_date.strftime("%Y-%m-%d")
+        is_today = (target_date == today)
 
         task_items = []
         lists_result = service.tasklists().list(maxResults=20).execute()
@@ -1780,7 +2142,9 @@ def fetch_google_tasks_api() -> list[str]:
 
                 due_raw = t.get("due")
                 time_str = ""
-                is_today = False
+                is_task_day = False
+
+                is_daily_routine = bool(re.search(r"\b(?:check-?in|daily|routine|every\s+day)\b", title, re.IGNORECASE))
 
                 if due_raw:
                     m_due = re.match(r"^(\d{4}-\d{2}-\d{2})(?:T(\d{2}):(\d{2}):(\d{2}))?", due_raw)
@@ -1793,27 +2157,31 @@ def fetch_google_tasks_api() -> list[str]:
                                 now_local = datetime.datetime.now()
                                 now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
                                 local_dt = utc_dt + (now_local - now_utc)
-                                if local_dt.date() == today:
-                                    is_today = True
+                                if local_dt.date() == target_date:
+                                    is_task_day = True
                                     h_int, m_int = local_dt.hour, local_dt.minute
                                     period = "AM" if h_int < 12 else "PM"
                                     disp_h = h_int if (1 <= h_int <= 12) else (12 if h_int == 0 else h_int - 12)
                                     time_str = f" at {disp_h}:{m_int:02d} {period}"
                             except Exception:
                                 if due_date_str == today_str:
-                                    is_today = True
+                                    is_task_day = True
                         else:
                             if due_date_str == today_str:
-                                is_today = True
-                else:
-                    is_today = True
+                                is_task_day = True
 
-                if is_today:
+                # If this is a daily recurring routine (like Night check-in), it repeats every day
+                if is_daily_routine:
+                    is_task_day = True
+
+                if is_task_day:
                     notes = (t.get("notes") or "").strip()
                     if not time_str:
-                        m_time = re.search(r"\b(?:at|by)\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b", f"{title} {notes}", re.IGNORECASE)
+                        m_time = re.search(r"(?:(?:\b(?:at|by)\s+)|[\(\[])\s*(\d{1,2}(?::\d{2})?\s*(?:am|pm))\b", f"{title} {notes}", re.IGNORECASE)
                         if m_time:
                             time_str = f" at {m_time.group(1).upper()}"
+                        elif re.search(r"\bnight\s+check-?in\b", title, re.IGNORECASE):
+                            time_str = " at 8:45 PM"
 
                     clean_title = re.sub(r"\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?.*$", "", title, flags=re.IGNORECASE).strip()
                     full_entry = f"{clean_title}{time_str}" if time_str else title
@@ -1825,11 +2193,42 @@ def fetch_google_tasks_api() -> list[str]:
         return []
 
 
+def fetch_schedule_range(start_date, num_days: int = 7, ctx: Context = None) -> str:
+    """Summarize schedule across an upcoming date window (e.g. this week)."""
+    import datetime
+    today = datetime.date.today()
+    days_with_items = []
+    for i in range(num_days):
+        d = start_date + datetime.timedelta(days=i)
+        evs = fetch_calendar_events(d) or []
+        tsks = fetch_tasks_today(d)
+        if evs and tsks:
+            task_keys = {normalize_title(t) for t in tsks if normalize_title(t)}
+            evs = [e for e in evs if normalize_title(e) not in task_keys]
+        combined = evs + tsks
+        if combined:
+            if d == today:
+                day_name = "Today"
+            elif d == today + datetime.timedelta(days=1):
+                day_name = "Tomorrow"
+            else:
+                day_name = d.strftime("%A, %b %d")
+            days_with_items.append(f"{day_name}: {'; '.join(combined)}")
+
+    if days_with_items:
+        return f"Here is your upcoming schedule for the next {num_days} days: " + " | ".join(days_with_items)
+    return f"Your schedule is completely clear for the next {num_days} days, sir."
+
+
 def h_calendar(arg: dict | str, ctx: Context) -> str:
-    """Report today's scheduled calendar events and tasks."""
-    ctx.do("fetch calendar events and tasks for today")
-    events = fetch_calendar_events()
-    tasks = fetch_tasks_today()
+    """Report scheduled calendar events and tasks for today or a requested date."""
+    target_date, label, is_range = parse_target_date(arg)
+    if is_range:
+        return fetch_schedule_range(target_date, 7, ctx)
+
+    ctx.do(f"fetch calendar events and tasks for {label}")
+    events = fetch_calendar_events(target_date)
+    tasks = fetch_tasks_today(target_date)
 
     # Deduplicate: if an event is also on the task list, avoid reading it twice
     if events and tasks:
@@ -1845,8 +2244,10 @@ def h_calendar(arg: dict | str, ctx: Context) -> str:
         t_items = "; ".join(tasks)
         parts.append(f"{len(tasks)} task{'s' if len(tasks) > 1 else ''}: {t_items}")
 
+    day_prefix = f"On your schedule {label}" if label in ("today", "tomorrow", "yesterday") or label.startswith("tomorrow") or label.startswith("yesterday") else f"On your schedule for {label}"
+
     if parts:
-        return f"On your schedule today, you have {'; and on your task list, you have '.join(parts)}."
+        return f"{day_prefix}, you have {'; and on your task list, you have '.join(parts)}."
     elif events is None and not tasks:
         return (
             "Your Google Calendar is not yet linked, sir. "
@@ -1855,11 +2256,11 @@ def h_calendar(arg: dict | str, ctx: Context) -> str:
         )
     elif events is None and tasks:
         t_items = "; ".join(tasks)
-        return f"Your calendar is not yet linked, but on your task list today, you have {len(tasks)} item{'s' if len(tasks) > 1 else ''}: {t_items}."
-    return "Your calendar and task list are completely clear for today, sir. No scheduled events or pending tasks."
+        return f"Your calendar is not yet linked, but on your task list for {label}, you have {len(tasks)} item{'s' if len(tasks) > 1 else ''}: {t_items}."
+    return f"Your calendar and task list are completely clear for {label}, sir. No scheduled events or pending tasks."
 
 
-def fetch_tasks_today() -> list[str]:
+def fetch_tasks_today(target_date: datetime.date | None = None) -> list[str]:
     """Fetch active tasks for today from:
     1. tasks.json (local tasks)
     2. Google Calendar events explicitly marked as tasks (e.g. 'Task: ...' or '[Task] ...')
@@ -1872,8 +2273,11 @@ def fetch_tasks_today() -> list[str]:
     from pathlib import Path
 
     today = datetime.date.today()
-    today_str = today.strftime("%Y-%m-%d")
-    today_num = today.strftime("%Y%m%d")
+    if target_date is None:
+        target_date = today
+    today_str = target_date.strftime("%Y-%m-%d")
+    today_num = target_date.strftime("%Y%m%d")
+    is_today = (target_date == today)
     tasks = []
     seen = set()
 
@@ -1887,7 +2291,7 @@ def fetch_tasks_today() -> list[str]:
                     if not isinstance(item, dict) or item.get("completed"):
                         continue
                     task_date = str(item.get("date") or "").strip()
-                    if not task_date or task_date == today_str:
+                    if (is_today and not task_date) or task_date == today_str:
                         title = item.get("title") or item.get("task") or "Untitled task"
                         time_str = str(item.get("time") or "").strip()
                         full_entry = f"{title} at {time_str}" if time_str else title
@@ -1938,7 +2342,7 @@ def fetch_tasks_today() -> list[str]:
                                 now_local = datetime.datetime.now()
                                 now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
                                 start_dt += (now_local - now_utc)
-                            if start_dt.date() == today:
+                            if start_dt.date() == target_date:
                                 is_today = True
                                 h_int, m_int = start_dt.hour, start_dt.minute
                                 period = "AM" if h_int < 12 else "PM"
@@ -1950,7 +2354,7 @@ def fetch_tasks_today() -> list[str]:
                         try:
                             sd = datetime.date(int(ev_date[:4]), int(ev_date[4:6]), int(ev_date[6:8]))
                             ed = datetime.date(int(end_date[:4]), int(end_date[4:6]), int(end_date[6:8])) if end_date else sd
-                            is_today = (sd <= today < ed) if ed > sd else (sd == today)
+                            is_today = (sd <= target_date < ed) if ed > sd else (sd == target_date)
                         except Exception:
                             pass
 
@@ -1980,7 +2384,14 @@ def fetch_tasks_today() -> list[str]:
                         continue
                     title = m_sum.group(1).strip().replace(r"\,", ",").replace(r"\;", ";")
                     m_due = re.search(r"(?:DUE|DTSTART)(?:;[^:]*)?:(\d{8})(?:T(\d{2})(\d{2}))?", todo)
-                    if not m_due or m_due.group(1) == today_num:
+                    is_todo_day = False
+                    if m_due:
+                        if m_due.group(1) == target_num:
+                            is_todo_day = True
+                    elif is_today:
+                        is_todo_day = True
+
+                    if is_todo_day:
                         hh, mm = (m_due.group(2), m_due.group(3)) if m_due else (None, None)
                         time_str = ""
                         if hh and mm:
@@ -2023,7 +2434,7 @@ def fetch_tasks_today() -> list[str]:
                                 now_local = datetime.datetime.now()
                                 now_utc = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
                                 start_dt += (now_local - now_utc)
-                            if start_dt.date() == today:
+                            if start_dt.date() == target_date:
                                 is_today = True
                                 h_int, m_int = start_dt.hour, start_dt.minute
                                 period = "AM" if h_int < 12 else "PM"
@@ -2049,7 +2460,7 @@ def fetch_tasks_today() -> list[str]:
 
     # 4. Google Tasks API (direct live sync if token.json is authenticated)
     try:
-        for gt in fetch_google_tasks_api():
+        for gt in fetch_google_tasks_api(target_date):
             norm = normalize_title(gt)
             if norm and norm not in seen:
                 seen.add(norm)
@@ -2058,6 +2469,10 @@ def fetch_tasks_today() -> list[str]:
         pass
 
     return tasks
+
+# Alias
+fetch_tasks_for_date = fetch_tasks_today
+
 
 
 def h_add_task(arg: dict | str, ctx: Context) -> str:
@@ -2111,13 +2526,18 @@ def h_add_task(arg: dict | str, ctx: Context) -> str:
 
 
 def h_list_tasks(arg: dict | str, ctx: Context) -> str:
-    """List active tasks for today."""
-    ctx.do("list today's tasks")
-    tasks = fetch_tasks_today()
+    """List active tasks for today or a requested date."""
+    target_date, label, is_range = parse_target_date(arg)
+    if is_range:
+        return fetch_schedule_range(target_date, 7, ctx)
+
+    ctx.do(f"list tasks for {label}")
+    tasks = fetch_tasks_today(target_date)
+    day_str = label if label in ("today", "tomorrow", "yesterday") or label.startswith("tomorrow") or label.startswith("yesterday") else f"for {label}"
     if tasks:
         items = "; ".join(tasks)
-        return f"On your task list today, you have {len(tasks)} item{'s' if len(tasks) > 1 else ''}: {items}."
-    return "Your task list is completely clear for today, sir."
+        return f"On your task list {day_str}, you have {len(tasks)} item{'s' if len(tasks) > 1 else ''}: {items}."
+    return f"Your task list is completely clear for {label}, sir."
 
 
 def h_daily_digest(arg: dict | str, ctx: Context) -> str:
@@ -2265,6 +2685,9 @@ def execute_tool(tool_name: str, args: dict, ctx: Context) -> str:
         elif tool_name == "play_youtube_video":
             return h_play_youtube(args, ctx)
 
+        elif tool_name in ("summarize_youtube_video", "youtube_summary", "summarize_video"):
+            return h_youtube_summary(args, ctx)
+
         elif tool_name in ("search_email", "read_and_summarize_email"):
             # If asked to read/summarize, use h_summarize_email
             if tool_name == "read_and_summarize_email" or args.get("summarize"):
@@ -2276,6 +2699,13 @@ def execute_tool(tool_name: str, args: dict, ctx: Context) -> str:
 
         elif tool_name == "web_search":
             return h_web_search(args.get("query", ""), ctx)
+
+        elif tool_name in ("optimize_memory", "clean_memory", "free_memory"):
+            return h_optimize_memory(args, ctx)
+
+        elif tool_name in ("autostart", "manage_autostart", "toggle_autostart"):
+            action_arg = args.get("action") or args.get("state") or "status"
+            return h_autostart(action_arg, ctx)
 
         elif tool_name in ("browse_page", "browse_web_page", "read_web_page"):
             return h_browse_page(args, ctx)
@@ -2391,15 +2821,174 @@ def h_check_chat(app: str, ctx: Context) -> str:
     return f"{shown} messages are end-to-end encrypted on your device and cannot be read in the background, sir. I have opened {shown} for you."
 
 
+def extract_youtube_video_id(url_or_text: str) -> str | None:
+    """Extract standard 11-char YouTube video ID from various URL formats."""
+    import re
+    if not url_or_text:
+        return None
+    s = str(url_or_text).strip()
+    if re.fullmatch(r"[\w-]{11}", s):
+        return s
+    patterns = [
+        r"(?:v=|\/v\/|youtu\.be\/|\/embed\/|\/shorts\/)([\w-]{11})",
+        r"([\w-]{11})"
+    ]
+    for p in patterns:
+        m = re.search(p, str(url_or_text).strip())
+        if m:
+            candidate = m.group(1)
+            if len(candidate) == 11:
+                return candidate
+    return None
+
+
+def fetch_youtube_video_info(video_id: str) -> dict:
+    """Fetch video metadata and transcript."""
+    import requests
+    info = {"title": "YouTube Video", "author": "Creator", "transcript": "", "video_id": video_id}
+
+    # 1. Fetch title and author via oEmbed
+    try:
+        oe_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+        r = requests.get(oe_url, timeout=5)
+        if r.status_code == 200:
+            data = r.json()
+            info["title"] = data.get("title", info["title"])
+            info["author"] = data.get("author_name", info["author"])
+    except Exception:
+        pass
+
+    # 2. Fetch transcript via youtube_transcript_api
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+        api = YouTubeTranscriptApi()
+        transcript_entries = None
+        try:
+            transcript_entries = api.fetch(video_id)
+        except Exception:
+            tl = api.list(video_id)
+            try:
+                t = tl.find_transcript(["en", "en-US", "en-GB"])
+                transcript_entries = t.fetch()
+            except Exception:
+                t = next(iter(tl))
+                if getattr(t, "is_translatable", False):
+                    transcript_entries = t.translate("en").fetch()
+                else:
+                    transcript_entries = t.fetch()
+
+        if transcript_entries:
+            info["transcript"] = " ".join(
+                getattr(s, "text", s.get("text", "") if isinstance(s, dict) else str(s))
+                for s in transcript_entries
+            )
+    except Exception:
+        pass
+
+    # 3. Fallback: If transcript unavailable via API, fetch video page description
+    if not info["transcript"]:
+        try:
+            page_r = requests.get(f"https://www.youtube.com/watch?v={video_id}", timeout=6, headers={"User-Agent": "Mozilla/5.0"})
+            if page_r.status_code == 200:
+                import re
+                m_desc = re.search(r'"shortDescription":"(.*?)"', page_r.text)
+                if m_desc:
+                    info["transcript"] = m_desc.group(1).encode("utf-8").decode("unicode_escape", errors="ignore")
+        except Exception:
+            pass
+
+    return info
+
+
+def h_youtube_summary(arg, ctx: Context) -> str:
+    """Summarize a YouTube video from link or video ID."""
+    url = ""
+    if isinstance(arg, dict):
+        url = arg.get("url") or arg.get("link") or arg.get("video_id") or ""
+    elif isinstance(arg, str):
+        url = arg.strip()
+
+    ctx.do(f"summarize YouTube video {url}")
+    video_id = extract_youtube_video_id(url)
+    if not video_id:
+        return "I couldn't find a valid YouTube video link in your request, sir."
+
+    info = fetch_youtube_video_info(video_id)
+    title = info["title"]
+    author = info["author"]
+    transcript = info["transcript"]
+
+    if not transcript:
+        return f"I located '{title}' by {author}, but transcripts and subtitles are disabled for this video, sir."
+
+    # Summarize with LLM
+    llm = getattr(ctx, "llm", None)
+    if not llm and hasattr(ctx, "asst") and getattr(ctx.asst, "llm", None):
+        llm = ctx.asst.llm
+
+    clipped_transcript = transcript[:15000]
+    prompt = (
+        "You are Jarvis, an elite executive AI assistant. "
+        "Summarize this YouTube video concisely, accurately, and cleanly for the user.\n\n"
+        f"Video Title: {title}\n"
+        f"Creator/Channel: {author}\n"
+        f"Transcript / Subtitles:\n{clipped_transcript}\n\n"
+        "Provide your summary in this exact structure:\n"
+        "**TL;DR**: (1-2 sentences capturing the core premise and big takeaway)\n\n"
+        "**Key Takeaways**:\n"
+        "- (Crisp bullet point 1)\n"
+        "- (Crisp bullet point 2)\n"
+        "- (Crisp bullet point 3)\n"
+        "- (Crisp bullet point 4)\n\n"
+        "**Conclusion**: (1 sentence concluding verdict)\n\n"
+        "Keep the language punchy, direct, and insightful."
+    )
+
+    summary_text = ""
+    if llm and hasattr(llm, "ask") and getattr(llm, "api_key", None):
+        try:
+            summary_text = llm.ask(prompt)
+        except Exception:
+            summary_text = ""
+
+    if not summary_text:
+        sentences = [s.strip() for s in transcript.split(".") if len(s.strip()) > 25]
+        preview = ". ".join(sentences[:4]) + "." if sentences else transcript[:300]
+        summary_text = f"**TL;DR**: Overview of '{title}' by {author}.\n\n**Key Takeaways**:\n- {preview}"
+
+    # Extract 1-sentence TL;DR for voice readout
+    first_line = "Here is the summary of the video."
+    for line in summary_text.splitlines():
+        clean_line = line.strip().lstrip("*-# ").strip()
+        if clean_line and "TL;DR" in clean_line:
+            first_line = clean_line.replace("TL;DR:", "").replace("TL;DR", "").strip()
+            break
+        elif clean_line and len(clean_line) > 20 and not clean_line.startswith("**"):
+            first_line = clean_line
+            break
+
+    full_display = f"📺 **{title}**\n*By {author}*\n\n{summary_text}"
+
+    # If widget is attached, show full formatted summary in scrollable view
+    if hasattr(ctx, "widget") and ctx.widget:
+        try:
+            ctx.widget._post_ui(lambda: setattr(ctx.widget, "last_reply", full_display))
+            ctx.widget._post_ui(lambda: ctx.widget.toggle_expand(True))
+        except Exception:
+            pass
+
+    return f"Here is the summary of '{title}' by {author}. {first_line}. The full breakdown is on your screen, sir."
+
+
 HANDLERS = {
     "open_app": h_open_app, "close_app": h_close_app, "website": h_website,
     "check_chat": h_check_chat,
-    "web_search": h_web_search, "youtube": h_youtube, "play_youtube": h_play_youtube,
+    "web_search": h_web_search, "youtube": h_youtube, "play_youtube": h_play_youtube, "youtube_summary": h_youtube_summary,
     "volume_set": h_volume_set, "volume_step": h_volume_step, "mute": h_mute, "media": h_media, "lock": h_lock,
     "sleep": h_sleep, "standby": h_standby, "show_desktop": h_show_desktop, "screenshot": h_screenshot,
     "theme": h_theme, "timer": h_timer, "timer_status": h_timer_status,
     "timer_cancel": h_timer_cancel, "say_time": h_say_time, "say_date": h_say_date,
-    "battery_status": h_battery_status, "system_stats": h_system_stats,
+    "battery_status": h_battery_status, "system_stats": h_system_stats, "optimize_memory": h_optimize_memory, "autostart": h_autostart,
     "email_summary": h_summarize_email, "email_search": h_search_email,
     "open_email_link": h_open_email_link,
     "browse_page": h_browse_page,

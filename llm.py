@@ -10,7 +10,7 @@ SYSTEM_PROMPT = (
     "Your responses are read aloud, so answer concisely in one to three plain sentences with no markdown or emojis. "
     "You have tools to control Windows, check battery diagnostics and power status, launch applications, create and open folders, take screenshots, search emails, browse the web, play YouTube videos, provide daily digests, and adjust system settings. "
     "When asked to perform tasks on the computer, invoke the appropriate tool. Never search the web for Windows system commands or folder creation. "
-    "When the user asks to open or summarize a repository, website, guide, or online resource (such as 'open genspark ai repo on brave and summarize it'), invoke browse_web_page (with the browser parameter if a browser like Brave or Chrome was mentioned) to automatically locate the link, launch it in their browser, and summarize the contents. Do not ask for confirmation if the user directly commanded to open and summarize it. "
+    "When the user asks to open or summarize a repository, website, guide, or online resource (such as 'open genspark ai repo on brave and summarize it'), invoke browse_web_page (with the browser parameter if a browser like Brave or Chrome was mentioned) to automatically locate the link, launch it in their browser, and summarize the contents. Do not ask for confirmation if the user directly commanded to open and summarize it. If the user asks a specific question about the URL, repository, or tool (such as 'can this be installed on Windows?'), always pass their exact question in the 'query' parameter of browse_web_page so it directly answers what they asked. "
     "For chat applications like WhatsApp, Telegram, or Signal, explain that messages are end-to-end encrypted on the device and cannot be intercepted in the background, and invoke open_app to bring up the application on screen."
 )
 
@@ -19,6 +19,17 @@ SYSTEM_PROMPT = (
 # --------------------------------------------------------------------------
 GEMINI_TOOLS = [{
     "function_declarations": [
+        {
+            "name": "summarize_youtube_video",
+            "description": "Fetch the transcript and summarize a YouTube video given its URL or link (e.g. 'https://www.youtube.com/watch?v=...', 'https://youtu.be/...', or 'https://www.youtube.com/shorts/...'). Generates a concise TL;DR, key takeaways, and conclusion.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "url": {"type": "STRING", "description": "The YouTube video URL or video ID to summarize"}
+                },
+                "required": ["url"]
+            }
+        },
         {
             "name": "play_youtube_video",
             "description": "Play a YouTube video, the latest upload, or the most viewed/popular video from a channel (e.g. 'sadhguru') in a browser.",
@@ -273,11 +284,31 @@ GEMINI_TOOLS = [{
             }
         },
         {
-            "name": "get_calendar_events",
-            "description": "Check and retrieve scheduled calendar events, appointments, and active tasks for today.",
+            "name": "manage_autostart",
+            "description": "Configure or check whether Jarvis automatically boots/starts when Windows starts up. Actions can be 'enable', 'disable', or 'status'.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "action": {"type": "STRING", "description": "'enable' to boot on startup, 'disable' to turn off, 'status' to check."}
+                }
+            }
+        },
+        {
+            "name": "optimize_memory",
+            "description": "Optimize and reduce system memory load (RAM) by flushing process working sets and reclaiming inactive memory. Use when system memory is elevated, or when the user asks to bring memory load down, free up RAM, or optimize memory.",
             "parameters": {
                 "type": "OBJECT",
                 "properties": {}
+            }
+        },
+        {
+            "name": "get_calendar_events",
+            "description": "Check and retrieve scheduled calendar events, appointments, and active tasks for a specific date (e.g. 'today', 'tomorrow', 'yesterday', 'Wednesday', 'Friday', 'Nov 5', or 'this week').",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {
+                    "date": {"type": "STRING", "description": "Target date or relative day to check, e.g. 'today', 'tomorrow', 'Friday', 'Nov 5', or 'this week'. Defaults to 'today'."}
+                }
             }
         }
     ]
@@ -306,232 +337,447 @@ OPENAI_TOOLS = [
 
 
 class LLM:
+    """Dual-Engine AI Brain with Seamless Intelligent Fallback (Gemini + Nex-N 2.5 / OpenRouter)."""
+
     def __init__(self, api_key: str, base_url: str, model: str, name: str = "Jarvis"):
+        import os
         self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
-        self.model = model or "gemini-3.5-flash"
+        self.base_url = base_url.rstrip("/") if base_url else "https://generativelanguage.googleapis.com/v1beta/openai"
+        self.model = model or "gemini-3.1-flash-lite"
         self.name = name
         self.history: list[dict] = []
         self.is_gemini = "generativelanguage.googleapis.com" in self.base_url
 
-    def ask(self, question: str) -> str:
-        """Simple plain text question answering without tools."""
-        if not self.api_key:
-            return "I can answer questions once you add an API key to the dot env file."
-        import requests
+        # Secondary Engine: Nex-N 2.5 / OpenRouter / Ollama
+        self.nex_api_key = os.environ.get("NEX_API_KEY", "").strip()
+        self.nex_base_url = os.environ.get("NEX_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+        self.nex_model = os.environ.get("NEX_MODEL", "nex-agi/nex-n2.5-mini").strip()
+        self.has_nex = bool(self.nex_api_key)
 
-        if self.is_gemini:
-            payload = {
-                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(name=self.name)}]},
-                "contents": [{"role": "user", "parts": [{"text": question}]}],
-                "generationConfig": {
-                    "maxOutputTokens": 600,
-                    "thinkingConfig": {"thinkingBudget": 0}
-                }
+    def _ask_gemini(self, question: str) -> str:
+        """Query Google Gemini directly with model rotation."""
+        import requests
+        payload = {
+            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(name=self.name)}]},
+            "contents": [{"role": "user", "parts": [{"text": question}]}],
+            "generationConfig": {
+                "maxOutputTokens": 600,
+                "thinkingConfig": {"thinkingBudget": 0}
             }
-            models_to_try = [self.model]
-            for alt in ("gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.5-flash"):
+        }
+        models_to_try = [self.model]
+        for alt in ("gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.5-flash"):
+            if alt not in models_to_try:
+                models_to_try.append(alt)
+
+        last_err = None
+        for model_candidate in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_candidate}:generateContent?key={self.api_key}"
+            try:
+                for attempt in range(2):
+                    try:
+                        r = requests.post(url, json=payload, timeout=30)
+                        if r.status_code in (503, 429) and attempt < 1:
+                            import time
+                            time.sleep(1.0)
+                            continue
+                        r.raise_for_status()
+                        break
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                        if attempt < 1:
+                            import time
+                            time.sleep(1.0)
+                            continue
+                        raise
+                data = r.json()
+                parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                text_parts = [p.get("text", "").strip() for p in parts if "text" in p]
+                answer = " ".join(t for t in text_parts if t)
+                if not answer:
+                    answer = "At your service, sir."
+                answer = re.sub(r"[*_#`]", "", answer)
+                self.history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+                return answer
+            except Exception as e:
+                last_err = e
+                continue
+        raise last_err or RuntimeError("Gemini unreachable")
+
+    def _ask_openai(self, question: str, base_url: str, api_key: str, model: str) -> str:
+        """Query OpenAI/OpenRouter/Nex-N 2.5/Ollama with verification bypass."""
+        import requests
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT.format(name=self.name)},
+            *self.history[-6:],
+            {"role": "user", "content": question}
+        ]
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://github.com/jarvis-assistant",
+            "X-Title": "Jarvis Assistant",
+        }
+
+        # Model rotation if primary slug returns 404
+        models_to_try = [model]
+        if "nex" in model:
+            for alt in ("nex-agi/nex-n2.5-mini", "nex-agi/nex-n2.5-pro"):
                 if alt not in models_to_try:
                     models_to_try.append(alt)
 
-            last_err = None
-            for model_candidate in models_to_try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_candidate}:generateContent?key={self.api_key}"
+        last_err = None
+        for m_cand in models_to_try:
+            try:
+                r = requests.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json={"model": m_cand, "messages": messages, "max_tokens": 300},
+                    timeout=30,
+                    verify=False
+                )
+                if r.status_code == 404:
+                    last_err = RuntimeError(r.text)
+                    continue
+                r.raise_for_status()
+                answer = r.json()["choices"][0]["message"]["content"].strip()
+                answer = re.sub(r"[*_#`]", "", answer)
+                self.history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
+                return answer
+            except Exception as e:
+                last_err = e
+                continue
+        raise last_err or RuntimeError("Nex ask failed")
+
+    def ask(self, question: str) -> str:
+        """Plain-text Q&A with dual-engine seamless fallback."""
+        if not self.api_key and not self.nex_api_key:
+            return "I can answer questions once you add an API key to the dot env file."
+
+        # 1. Try Primary Engine
+        if self.is_gemini and self.api_key:
+            try:
+                return self._ask_gemini(question)
+            except Exception as e:
+                if self.has_nex:
+                    print(f"  [Dual Engine] Gemini ask failed ({e}), falling back to Nex-N 2.5...")
+                    try:
+                        return self._ask_openai(question, self.nex_base_url, self.nex_api_key, self.nex_model)
+                    except Exception as e_nex:
+                        print(f"  [Dual Engine] Nex-N 2.5 ask fallback failed ({e_nex})")
+                return "Sorry, I couldn't reach the question service."
+        else:
+            try:
+                target_base = self.base_url if self.api_key else self.nex_base_url
+                target_key = self.api_key if self.api_key else self.nex_api_key
+                target_model = self.model if self.api_key else self.nex_model
+                return self._ask_openai(question, target_base, target_key, target_model)
+            except Exception as e:
+                print(f"  [Dual Engine] Primary ask failed ({e})")
+                if self.has_nex and self.base_url != self.nex_base_url:
+                    try:
+                        return self._ask_openai(question, self.nex_base_url, self.nex_api_key, self.nex_model)
+                    except Exception:
+                        pass
+                return "Sorry, I couldn't reach the question service."
+
+    def synthesize_document(self, prompt: str, system_prompt: str | None = None, max_tokens: int = 3500) -> str:
+        """Synthesize long-form, comprehensive research dossiers and markdown reports (dual-engine)."""
+        import requests
+        import urllib3
+        urllib3.disable_warnings()
+
+        sys_inst = system_prompt or (
+            f"You are {self.name}, an elite intelligence analyst and executive research dossier writer. "
+            "Synthesize exhaustive, comprehensive, deeply insightful dossiers in clean GitHub Flavored Markdown. "
+            "Include an Executive Summary, Key Strategic Themes, Detailed Historical & Operational Analysis, "
+            "Framework Breakdowns, Tactical Takeaways for Executive Leadership, and Concluding Remarks. "
+            "Do NOT truncate, do not speak in short voice sentences, and preserve all rich markdown formatting."
+        )
+
+        # 1. Try Gemini Native first
+        if self.is_gemini and self.api_key:
+            payload = {
+                "systemInstruction": {"parts": [{"text": sys_inst}]},
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "maxOutputTokens": max_tokens,
+                    "temperature": 0.4
+                }
+            }
+            models_to_try = [self.model, "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.5-flash"]
+            for m_cand in models_to_try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{m_cand}:generateContent?key={self.api_key}"
                 try:
-                    for attempt in range(2):
-                        try:
-                            r = requests.post(url, json=payload, timeout=35)
-                            if r.status_code in (503, 429) and attempt < 1:
-                                import time
-                                time.sleep(1.2)
-                                continue
-                            r.raise_for_status()
-                            break
-                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                            if attempt < 1:
-                                import time
-                                time.sleep(1.2)
-                                continue
-                            raise
-                    data = r.json()
-                    parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                    text_parts = [p.get("text", "").strip() for p in parts if "text" in p]
-                    answer = " ".join(t for t in text_parts if t)
-                    if not answer:
-                        answer = "At your service, sir."
-                    answer = re.sub(r"[*_#`]", "", answer)
-                    self.history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
-                    return answer
-                except Exception as e:
-                    last_err = e
+                    r = requests.post(url, json=payload, timeout=45)
+                    if r.status_code == 200:
+                        data = r.json()
+                        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                        text_parts = [p.get("text", "").strip() for p in parts if "text" in p]
+                        res = "\n\n".join(t for t in text_parts if t)
+                        if res and len(res) > 100:
+                            return res
+                except Exception:
                     continue
 
-            print(f"  [llm error] {last_err!r}")
-            return "Sorry, I couldn't reach the question service."
+        # 2. Try OpenRouter / Nex-N 2.5
+        if self.has_nex:
+            headers = {
+                "Authorization": f"Bearer {self.nex_api_key}",
+                "HTTP-Referer": "https://github.com/jarvis-assistant",
+                "X-Title": "Jarvis Assistant",
+            }
+            messages = [
+                {"role": "system", "content": sys_inst},
+                {"role": "user", "content": prompt}
+            ]
+            for m_cand in (self.nex_model, "nex-agi/nex-n2.5-pro", "nex-agi/nex-n2.5-mini"):
+                try:
+                    r = requests.post(
+                        f"{self.nex_base_url}/chat/completions",
+                        headers=headers,
+                        json={"model": m_cand, "messages": messages, "max_tokens": max_tokens},
+                        timeout=45,
+                        verify=False
+                    )
+                    if r.status_code == 200:
+                        content = r.json()["choices"][0]["message"]["content"].strip()
+                        if content and len(content) > 100:
+                            return content
+                except Exception:
+                    continue
 
-        # OpenAI-compatible fallback
-        messages = [{"role": "system", "content": SYSTEM_PROMPT.format(name=self.name)},
-                    *self.history[-6:], {"role": "user", "content": question}]
-        try:
-            r = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": self.model, "messages": messages, "max_tokens": 250},
-                timeout=35,
-            )
-            r.raise_for_status()
-            answer = r.json()["choices"][0]["message"]["content"].strip()
-            self.history += [{"role": "user", "content": question}, {"role": "assistant", "content": answer}]
-            return answer
-        except Exception as e:
-            print(f"  [llm error] {e!r}")
-            return "Sorry, I couldn't reach the question service."
+        return ""
 
-    def agent_run(self, prompt: str, ctx) -> str:
-        """Agentic loop: executes multi-step tasks using tool calling."""
-        if not self.api_key:
-            return "I need an API key configured to execute advanced or multi-step tasks."
+    def _run_gemini_agent(self, prompt: str, ctx) -> str:
+        """Run tool-calling agent using Gemini Native API."""
         import requests
         from actions import execute_tool
 
-        # --- NATIVE GEMINI IMPLEMENTATION (Fast, robust, zero timeout) ---
-        if self.is_gemini:
-            payload = {
-                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(name=self.name)}]},
-                "contents": [
-                    *[
-                        {"role": "user" if h["role"] == "user" else "model", "parts": [{"text": h["content"]}]}
-                        for h in self.history[-4:]
-                    ],
-                    {"role": "user", "parts": [{"text": prompt}]}
+        payload = {
+            "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT.format(name=self.name)}]},
+            "contents": [
+                *[
+                    {"role": "user" if h["role"] == "user" else "model", "parts": [{"text": h["content"]}]}
+                    for h in self.history[-4:]
                 ],
-                "tools": GEMINI_TOOLS,
-                "generationConfig": {
-                    "maxOutputTokens": 600,
-                    "thinkingConfig": {"thinkingBudget": 0}
-                }
+                {"role": "user", "parts": [{"text": prompt}]}
+            ],
+            "tools": GEMINI_TOOLS,
+            "generationConfig": {
+                "maxOutputTokens": 600,
+                "thinkingConfig": {"thinkingBudget": 0}
             }
+        }
 
-            models_to_try = [self.model]
-            for alt in ("gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.5-flash"):
-                if alt not in models_to_try:
-                    models_to_try.append(alt)
+        models_to_try = [self.model]
+        for alt in ("gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.5-flash"):
+            if alt not in models_to_try:
+                models_to_try.append(alt)
 
-            last_err = None
-            for model_candidate in models_to_try:
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_candidate}:generateContent?key={self.api_key}"
-                try:
-                    for attempt in range(2):
-                        try:
-                            r = requests.post(url, json=payload, timeout=35)
-                            if r.status_code in (503, 429) and attempt < 1:
-                                import time
-                                time.sleep(1.2)
-                                continue
-                            r.raise_for_status()
-                            break
-                        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-                            if attempt < 1:
-                                import time
-                                time.sleep(1.2)
-                                continue
-                            raise
-                    data = r.json()
-                    candidate = data["candidates"][0]
-                    parts = candidate.get("content", {}).get("parts", [])
+        last_err = None
+        for model_candidate in models_to_try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_candidate}:generateContent?key={self.api_key}"
+            try:
+                for attempt in range(2):
+                    try:
+                        r = requests.post(url, json=payload, timeout=30)
+                        if r.status_code in (503, 429) and attempt < 1:
+                            import time
+                            time.sleep(1.0)
+                            continue
+                        r.raise_for_status()
+                        break
+                    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                        if attempt < 1:
+                            import time
+                            time.sleep(1.0)
+                            continue
+                        raise
+                data = r.json()
+                candidate = data["candidates"][0]
+                parts = candidate.get("content", {}).get("parts", [])
 
-                    executed_replies: list[str] = []
-                    for p in parts:
-                        if "functionCall" in p:
-                            fn = p["functionCall"]
-                            fn_name = fn.get("name", "")
-                            fn_args = fn.get("args", {})
-                            result = execute_tool(fn_name, fn_args, ctx)
-                            if result:
-                                executed_replies.append(result)
+                executed_replies: list[str] = []
+                for p in parts:
+                    if "functionCall" in p:
+                        fn = p["functionCall"]
+                        fn_name = fn.get("name", "")
+                        fn_args = fn.get("args", {})
+                        result = execute_tool(fn_name, fn_args, ctx)
+                        if result:
+                            executed_replies.append(result)
 
-                    if executed_replies:
-                        summary = " ".join(executed_replies)
-                        self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": summary}]
-                        return summary
+                if executed_replies:
+                    summary = " ".join(executed_replies)
+                    self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": summary}]
+                    return summary
 
-                    # Plain text reply
-                    text_parts = [p.get("text", "").strip() for p in parts if "text" in p]
-                    answer = " ".join(t for t in text_parts if t)
-                    if not answer:
-                        answer = "At your service, sir."
-                    answer = re.sub(r"[*_#`]", "", answer)
-                    self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": answer}]
-                    return answer
-                except Exception as e:
-                    last_err = e
-                    continue
+                text_parts = [p.get("text", "").strip() for p in parts if "text" in p]
+                answer = " ".join(t for t in text_parts if t)
+                if not answer:
+                    answer = "At your service, sir."
+                answer = re.sub(r"[*_#`]", "", answer)
+                self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": answer}]
+                return answer
+            except Exception as e:
+                last_err = e
+                continue
+        raise last_err or RuntimeError("Gemini agent failed")
 
-            print(f"  [agent error] {last_err!r}")
-            p_lower = prompt.lower()
-            if any(w in p_lower for w in ("daily digest", "morning digest", "digest", "brief me", "morning briefing", "daily briefing")):
-                return execute_tool("daily_digest", {}, ctx)
-            if "weather" in p_lower:
-                return execute_tool("weather", {"city": "Coimbatore"}, ctx)
-            if "calendar" in p_lower:
-                return execute_tool("calendar", {}, ctx)
-            if any(w in p_lower for w in ("create folder", "make folder", "create that folder", "do it for me", "create it for me")):
-                return execute_tool("create_folder", {"path_or_name": "Pictures/Jarvis"}, ctx)
-            if any(w in p_lower for w in ("open folder", "open pictures", "open jarvis")):
-                return execute_tool("open_folder", {"folder_name": "jarvis"}, ctx)
-            if any(w in p_lower for w in ("email", "emails", "inbox", "samyama", "application", "mail")):
-                from commands import _extract_email_info
-                q, count = _extract_email_info(prompt)
-                return execute_tool("read_and_summarize_email", {"query": q, "count": count}, ctx)
-            if "youtube" in p_lower:
-                return execute_tool("play_youtube_video", {"query_or_channel": prompt}, ctx)
-            if any(w in p_lower for w in ("search", "google", "look up", "find")):
-                return execute_tool("web_search", {"query": prompt}, ctx)
-            return "I apologize, sir. I had trouble connecting to the network."
+    def _run_openai_agent(self, prompt: str, ctx, base_url: str, api_key: str, model: str) -> str:
+        """Run tool-calling agent using OpenAI / Nex-N 2.5 / OpenRouter."""
+        import requests
+        import urllib3
+        from actions import execute_tool
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-        # --- OPENAI-COMPATIBLE FALLBACK ---
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT.format(name=self.name)},
             *self.history[-4:],
             {"role": "user", "content": prompt}
         ]
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "HTTP-Referer": "https://github.com/jarvis-assistant",
+            "X-Title": "Jarvis Assistant",
+        }
 
-        try:
-            r = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={"model": self.model, "messages": messages, "tools": OPENAI_TOOLS, "max_tokens": 300},
-                timeout=35,
-            )
-            r.raise_for_status()
-            choice = r.json()["choices"][0]
-            msg = choice.get("message", {})
-            tool_calls = msg.get("tool_calls")
+        # Try specified model first, then common Nex slugs if available
+        models_to_test = [model]
+        if "nex" in model:
+            for alt in ("nex-agi/nex-n2.5-mini", "nex-agi/nex-n2.5-pro", "nex-agi/nex-n2.5-mini:free"):
+                if alt not in models_to_test:
+                    models_to_test.append(alt)
 
-            if not tool_calls:
-                content = (msg.get("content") or "").strip() or "At your service, sir."
-                self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": content}]
-                return content
+        last_err = None
+        for m_candidate in models_to_test:
+            try:
+                r = requests.post(
+                    f"{base_url}/chat/completions",
+                    headers=headers,
+                    json={"model": m_candidate, "messages": messages, "tools": OPENAI_TOOLS, "max_tokens": 400},
+                    timeout=30,
+                    verify=False
+                )
+                if r.status_code == 404:
+                    last_err = RuntimeError(r.text)
+                    continue
+                r.raise_for_status()
 
-            executed_replies: list[str] = []
-            for tc in tool_calls:
-                fn_name = tc.get("function", {}).get("name", "")
-                raw_args = tc.get("function", {}).get("arguments", "{}")
+                choice = r.json()["choices"][0]
+                msg = choice.get("message", {})
+                tool_calls = msg.get("tool_calls")
+
+                if not tool_calls:
+                    content = (msg.get("content") or "").strip() or "At your service, sir."
+                    content = re.sub(r"[*_#`]", "", content)
+                    self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": content}]
+                    return content
+
+                executed_replies: list[str] = []
+                for tc in tool_calls:
+                    fn_name = tc.get("function", {}).get("name", "")
+                    raw_args = tc.get("function", {}).get("arguments", "{}")
+                    try:
+                        fn_args = json.loads(raw_args)
+                    except Exception:
+                        fn_args = {}
+                    result = execute_tool(fn_name, fn_args, ctx)
+                    if result:
+                        executed_replies.append(result)
+
+                if executed_replies:
+                    summary = " ".join(executed_replies)
+                    self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": summary}]
+                    return summary
+                return "Done, sir."
+
+            except Exception as e:
+                last_err = e
+                continue
+
+        raise last_err or RuntimeError("Nex agent failed")
+
+    def agent_run(self, prompt: str, ctx) -> str:
+        """Agentic loop with smart task routing and automatic seamless fallback."""
+        if not self.api_key and not self.nex_api_key:
+            return "I need an API key configured to execute advanced or multi-step tasks."
+
+        from actions import execute_tool
+        p_lower = prompt.lower()
+
+        # Intelligent Task Routing:
+        # Route web research, browser scraping, and agentic workflows to Nex-N 2.5
+        prefer_nex = self.has_nex and any(k in p_lower for k in ("research", "browse", "website", "code", "scrape", "analyze repo", "github", "inspect page"))
+
+        if prefer_nex:
+            print("  [Dual Engine] Routing to Nex-N 2.5 (Agentic Web/Research Specialist)...")
+            try:
+                return self._run_openai_agent(prompt, ctx, self.nex_base_url, self.nex_api_key, self.nex_model)
+            except Exception as e_nex:
+                print(f"  [Dual Engine] Nex-N 2.5 failed ({e_nex}), seamlessly falling back to Gemini...")
+                if self.is_gemini and self.api_key:
+                    try:
+                        return self._run_gemini_agent(prompt, ctx)
+                    except Exception as e_gem:
+                        print(f"  [Dual Engine] Gemini fallback also failed ({e_gem})")
+        else:
+            # Primary Engine: Gemini (Ultra-low latency voice, quick QA, vision)
+            if self.is_gemini and self.api_key:
                 try:
-                    fn_args = json.loads(raw_args)
-                except Exception:
-                    fn_args = {}
-                result = execute_tool(fn_name, fn_args, ctx)
-                if result:
-                    executed_replies.append(result)
+                    return self._run_gemini_agent(prompt, ctx)
+                except Exception as e_gem:
+                    print(f"  [Dual Engine] Gemini failed ({e_gem}), seamlessly falling back to Nex-N 2.5...")
+                    if self.has_nex:
+                        try:
+                            return self._run_openai_agent(prompt, ctx, self.nex_base_url, self.nex_api_key, self.nex_model)
+                        except Exception as e_nex:
+                            print(f"  [Dual Engine] Nex-N 2.5 fallback failed ({e_nex})")
+            else:
+                target_base = self.base_url if self.api_key else self.nex_base_url
+                target_key = self.api_key if self.api_key else self.nex_api_key
+                target_model = self.model if self.api_key else self.nex_model
+                try:
+                    return self._run_openai_agent(prompt, ctx, target_base, target_key, target_model)
+                except Exception as e_main:
+                    print(f"  [Dual Engine] Primary agent failed ({e_main})")
+                    if self.has_nex and self.base_url != self.nex_base_url:
+                        try:
+                            return self._run_openai_agent(prompt, ctx, self.nex_base_url, self.nex_api_key, self.nex_model)
+                        except Exception:
+                            pass
 
-            if executed_replies:
-                summary = " ".join(executed_replies)
-                self.history += [{"role": "user", "content": prompt}, {"role": "assistant", "content": summary}]
-                return summary
-
-            return "Done, sir."
-
-        except Exception as e:
-            print(f"  [agent error] {e!r}")
-            return "I apologize, sir. I had trouble connecting to the network."
+        # Final Local Rule-Based Deterministic Fallback
+        if any(w in p_lower for w in ("daily digest", "morning digest", "digest", "brief me", "morning briefing", "daily briefing")):
+            return execute_tool("daily_digest", {}, ctx)
+        if any(w in p_lower for w in ("auto start", "autostart", "start on boot", "boot on startup", "run on startup")):
+            act = "disable" if any(k in p_lower for k in ("disable", "stop", "off", "dont", "don't")) else ("enable" if any(k in p_lower for k in ("enable", "turn on", "on", "start")) else "status")
+            return execute_tool("manage_autostart", {"action": act}, ctx)
+        if any(w in p_lower for w in ("clean memory", "free memory", "free ram", "optimize memory", "optimize ram", "bring the load down", "bring memory down", "reduce memory load")):
+            return execute_tool("optimize_memory", {}, ctx)
+        if "weather" in p_lower:
+            return execute_tool("weather", {"city": "Coimbatore"}, ctx)
+        if "calendar" in p_lower or "calender" in p_lower or "schedule" in p_lower:
+            m_d = re.search(r"\b(today|tomorrow|yesterday|day\s+after\s+tomorrow|this\s+week|next\s+week|monday|tuesday|wednesday|thursday|friday|saturday|sunday|nov(?:ember)?\s+\d{1,2})\b", p_lower)
+            d_val = m_d.group(1) if m_d else "today"
+            return execute_tool("calendar", {"date": d_val}, ctx)
+        if any(w in p_lower for w in ("create folder", "make folder", "create that folder", "do it for me", "create it for me")):
+            return execute_tool("create_folder", {"path_or_name": "Pictures/Jarvis"}, ctx)
+        if any(w in p_lower for w in ("open folder", "open pictures", "open jarvis")):
+            return execute_tool("open_folder", {"folder_name": "jarvis"}, ctx)
+        if any(w in p_lower for w in ("email", "emails", "inbox", "samyama", "application", "mail")):
+            from commands import _extract_email_info
+            q, count = _extract_email_info(prompt)
+            return execute_tool("read_and_summarize_email", {"query": q, "count": count}, ctx)
+        if "youtube" in p_lower and any(w in p_lower for w in ("summarize", "summary", "tldr", "explain", "about")):
+            from commands import RE_YOUTUBE_URL_EXTRACT
+            m_yt = RE_YOUTUBE_URL_EXTRACT.search(prompt)
+            yt_url = m_yt.group(0) if m_yt else prompt
+            return execute_tool("summarize_youtube_video", {"url": yt_url}, ctx)
+        if "youtube" in p_lower:
+            return execute_tool("play_youtube_video", {"query_or_channel": prompt}, ctx)
+        if any(w in p_lower for w in ("search", "google", "look up", "find")):
+            return execute_tool("web_search", {"query": prompt}, ctx)
+        return "I apologize, sir. I had trouble connecting to the network."

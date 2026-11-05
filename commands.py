@@ -179,6 +179,17 @@ RE_BATTERY = re.compile(
     re.IGNORECASE
 )
 
+RE_AUTOSTART = re.compile(
+    r"^(?:"
+    r"(?:(?:enable|turn\s+on|activate|start)\s+(?:auto\s*start|start\s+on\s+boot|boot\s+on\s+startup|startup|auto\s*boot))"
+    r"|(?:(?:start|run|launch)\s+(?:on\s+boot|on\s+startup|when\s+(?:the\s+)?(?:pc|computer|system)\s+(?:boots|starts)))"
+    r"|(?:(?:disable|turn\s+off|deactivate|stop)\s+(?:auto\s*start|start\s+on\s+boot|boot\s+on\s+startup|startup|auto\s*boot))"
+    r"|(?:(?:don\'t|do\s+not)\s+(?:start|launch|boot|run)\s+(?:on\s+boot|on\s+startup|when\s+(?:the\s+)?(?:pc|computer|system)\s+(?:boots|starts)))"
+    r"|(?:(?:is|check|status\s+of)\s+(?:auto\s*start|start\s+on\s+boot|startup))"
+    r")$",
+    re.IGNORECASE
+)
+
 RE_SYSTEM_STATS = re.compile(
     r"^(?:"
     r"(?:what\s+(?:are|is)\s+(?:the\s+|our\s+)?(?:system\s+)?(?:stats|status|diagnostics|telemetry|performance|health))"
@@ -196,6 +207,15 @@ RE_CPU_STATS = re.compile(
     r"|(?:how\s+is\s+(?:the\s+)?cpu(?:\s+doing)?)"
     r"|(?:(?:check|show|get)\s+(?:the\s+)?cpu(?:\s+(?:usage|utilization|load|stats))?)"
     r"|(?:cpu\s+(?:usage|utilization|load|percentage|status|stats|info))"
+    r")$",
+    re.IGNORECASE
+)
+
+RE_OPTIMIZE_MEMORY = re.compile(
+    r"^(?:"
+    r"(?:(?:clean|clear|free|optimize|flush|purge|reduce|lower)\s+(?:up\s+)?(?:the\s+|our\s+)?(?:system\s+)?(?:memory|ram|cache|memory\s+load|system\s+load|working\s+sets?))"
+    r"|(?:(?:bring|get|lower|cut)\s+(?:the\s+)?(?:memory\s+|system\s+)?load\s+down)"
+    r"|(?:optimize|free\s+up\s+ram|clean\s+ram|flush\s+ram|clear\s+ram|purge\s+ram|optimize\s+ram|clean\s+memory|free\s+memory|free\s+up\s+memory|optimize\s+memory)"
     r")$",
     re.IGNORECASE
 )
@@ -240,11 +260,11 @@ RE_WEATHER = re.compile(
 
 RE_CALENDAR = re.compile(
     r"^(?:"
-    r"(?:what(?:\'s|\s+is)\s+(?:on|in|there\s+on)\s+(?:the\s+|my\s+)?calendar(?:\s+(?:for\s+)?today)?)"
-    r"|(?:(?:check|show|get|list|display)\s+(?:the\s+|my\s+)?(?:calendar|agenda|schedule|meetings|events)(?:\s+(?:for\s+)?today)?)"
-    r"|(?:do\s+i\s+have\s+(?:any\s+)?(?:meetings|events|plans|schedule|calls)(?:\s+(?:for\s+)?today)?)"
-    r"|(?:what\s+do\s+i\s+have\s+(?:scheduled|planned|on)\s+today)"
-    r"|(?:(?:my\s+)?(?:schedule|agenda|calendar)(?:\s+today)?)"
+    r"(?:what(?:\'s|s|\s+is)\s+(?:on|in|there\s+on)\s+(?:the\s+|my\s+)?calenda?e?r(?:\s+(?:for|on)?\s*(?P<date1>today|tomorrow|yesterday|day\s+after\s+tomorrow|this\s+week|next\s+week|[\w\s.-]+))?)"
+    r"|(?:(?:check|show|get|list|display)\s+(?:the\s+|my\s+)?(?:calenda?e?r|agenda|schedule|meetings|events)(?:\s+(?:for|on)?\s*(?P<date2>today|tomorrow|yesterday|day\s+after\s+tomorrow|this\s+week|next\s+week|[\w\s.-]+))?)"
+    r"|(?:do\s+i\s+have\s+(?:any\s+)?(?:meetings|events|plans|schedule|calls)(?:\s+(?:for|on)?\s*(?P<date3>today|tomorrow|yesterday|day\s+after\s+tomorrow|this\s+week|next\s+week|[\w\s.-]+))?)"
+    r"|(?:what\s+do\s+i\s+have\s+(?:scheduled|planned|on)(?:\s+(?:for|on)?\s*(?P<date4>today|tomorrow|yesterday|day\s+after\s+tomorrow|this\s+week|next\s+week|[\w\s.-]+))?)"
+    r"|(?:(?:my\s+)?(?:schedule|agenda|calenda?e?r)(?:\s+(?:for|on)?\s*(?P<date5>today|tomorrow|yesterday|day\s+after\s+tomorrow|this\s+week|next\s+week|[\w\s.-]+))?)"
     r")$",
     re.IGNORECASE
 )
@@ -256,10 +276,10 @@ RE_ADD_TASK = re.compile(
 
 RE_LIST_TASKS = re.compile(
     r"^(?:"
-    r"(?:what\s+(?:are|is)\s+(?:the\s+|my\s+)?tasks?(?:\s+(?:for\s+)?today)?)"
-    r"|(?:(?:check|show|get|list|display|read)\s+(?:the\s+|my\s+)?tasks?(?:\s+(?:for\s+)?today)?)"
-    r"|(?:do\s+i\s+have\s+(?:any\s+)?tasks?(?:\s+(?:for\s+)?today)?)"
-    r"|(?:(?:my\s+)?tasks?(?:\s+today)?)"
+    r"(?:what\s+(?:are|is)\s+(?:the\s+|my\s+)?tasks?(?:\s+(?:for|on)?\s*(?P<date1>today|tomorrow|yesterday|this\s+week|next\s+week|[\w\s.-]+))?)"
+    r"|(?:(?:check|show|get|list|display|read)\s+(?:the\s+|my\s+)?tasks?(?:\s+(?:for|on)?\s*(?P<date2>today|tomorrow|yesterday|this\s+week|next\s+week|[\w\s.-]+))?)"
+    r"|(?:do\s+i\s+have\s+(?:any\s+)?tasks?(?:\s+(?:for|on)?\s*(?P<date3>today|tomorrow|yesterday|this\s+week|next\s+week|[\w\s.-]+))?)"
+    r"|(?:(?:my\s+)?tasks?(?:\s+(?:for|on)?\s*(?P<date4>today|tomorrow|yesterday|this\s+week|next\s+week|[\w\s.-]+))?)"
     r")$",
     re.IGNORECASE
 )
@@ -304,6 +324,10 @@ RE_RESEARCH = re.compile(
     re.IGNORECASE
 )
 RE_YT = re.compile(r"^(?:(?:search|look up|find) youtube for (?P<q>.+)|search for (?P<q2>.+?) on youtube)$")
+RE_YOUTUBE_URL_EXTRACT = re.compile(
+    r"(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/|v/)|youtu\.be/)([\w-]{11})[^\s]*",
+    re.IGNORECASE
+)
 RE_CHAT_CHECK = re.compile(
     r"^(?:please\s+|can\s+you\s+(?:please\s+)?)?"
     r"(?:(?:check|see|read|look\s+at|show\s+me|any|do\s+i\s+have\s+any)\s+)?"
@@ -400,9 +424,9 @@ RE_OPEN_FOLDER = re.compile(
 _SPLIT = re.compile(r"\s+(?:and then|and also|and|then|also)\s+")
 _NO_SPLIT = {
     "timer", "web_search", "youtube", "email_summary", "email_search", "open_email_link", "browse_page",
-    "screen_vision", "clipboard", "deep_research", "stop", "check_chat",
+    "screen_vision", "clipboard", "deep_research", "stop", "check_chat", "youtube_summary",
     "set_screenshot_dir", "create_folder", "open_folder", "battery_status",
-    "system_stats", "daily_digest", "weather", "calendar", "add_task", "list_tasks"
+    "system_stats", "optimize_memory", "autostart", "daily_digest", "weather", "calendar", "add_task", "list_tasks"
 }
 
 _UP = {"up", "raise", "increase", "louder", "higher", "pump", "crank"}
@@ -505,6 +529,16 @@ def _parse_single(t: str, names) -> Action | None:
         return Action("system_stats", "all")
     if RE_CPU_STATS.match(t):
         return Action("system_stats", "cpu")
+    if RE_AUTOSTART.match(t):
+        t_low = t.lower()
+        if re.search(r"\b(?:status|is|check)\b", t_low):
+            return Action("autostart", "status")
+        elif re.search(r"\b(?:disable|turn\s+off|deactivate|stop|don\'?t|do\s+not)\b", t_low):
+            return Action("autostart", "disable")
+        else:
+            return Action("autostart", "enable")
+    if RE_OPTIMIZE_MEMORY.match(t):
+        return Action("optimize_memory")
     if RE_RAM_STATS.match(t):
         return Action("system_stats", "ram")
     if RE_DISK_STATS.match(t):
@@ -517,13 +551,21 @@ def _parse_single(t: str, names) -> Action | None:
     if m:
         city = (m.group("city1") or m.group("city2") or "Coimbatore").strip()
         return Action("weather", city)
-    if RE_CALENDAR.match(t):
-        return Action("calendar")
+    m_cal = RE_CALENDAR.match(t)
+    if m_cal:
+        gd = m_cal.groupdict()
+        d_val = gd.get("date1") or gd.get("date2") or gd.get("date3") or gd.get("date4") or gd.get("date5")
+        d_arg = d_val.strip() if d_val else "today"
+        return Action("calendar", {"date": d_arg} if d_arg != "today" else None)
     m = RE_ADD_TASK.match(t)
     if m:
         return Action("add_task", m.group("task").strip())
-    if RE_LIST_TASKS.match(t):
-        return Action("list_tasks")
+    m_tsk = RE_LIST_TASKS.match(t)
+    if m_tsk:
+        gd = m_tsk.groupdict()
+        d_val = gd.get("date1") or gd.get("date2") or gd.get("date3") or gd.get("date4")
+        d_arg = d_val.strip() if d_val else "today"
+        return Action("list_tasks", {"date": d_arg} if d_arg != "today" else None)
 
     m = RE_SCREEN_VISION.match(t)
     if m:
@@ -611,6 +653,23 @@ def _parse_single(t: str, names) -> Action | None:
 
 def parse(text: str, names=("jarvis",)) -> list[Action]:
     """Return the actions in a sentence. An empty list means "not a command"."""
+    if not text or not str(text).strip():
+        return []
+
+    # Check for YouTube video summarization intent before dropping URL parameters (?, =)
+    yt_m = RE_YOUTUBE_URL_EXTRACT.search(text)
+    if yt_m:
+        raw_lower = text.lower()
+        yt_url = yt_m.group(0).rstrip(".,;!?'\"")
+        is_just_url = (text.strip().rstrip(".,;!?'\"") == yt_url)
+        has_summary_intent = any(w in raw_lower for w in (
+            "summarize", "summarise", "summary", "tldr", "explain",
+            "what is this", "what's this", "what is the video", "what's the video",
+            "break down", "breakdown", "overview", "recap", "review", "about"
+        ))
+        if is_just_url or has_summary_intent:
+            return [Action("youtube_summary", {"url": yt_url})]
+
     t = normalize(text)
     if not t:
         return []

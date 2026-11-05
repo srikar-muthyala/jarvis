@@ -90,18 +90,31 @@ def deep_research_topic(topic: str, ctx) -> tuple[str, str]:
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     slug = re.sub(r"[^\w\-_]+", "_", clean_topic.lower())[:30]
 
-    if llm and sources_data:
-        # 3. Synthesize structured report
+    if llm:
+        # 3. Synthesize deep structured report using document writer (never truncated or voice-limited)
         report_prompt = (
-            f"You are J.A.R.V.I.S., Tony Stark's AI assistant. Synthesize a comprehensive, executive intelligence briefing on '{clean_topic}'.\n\n"
+            f"Synthesize an authoritative, exhaustive executive research dossier on '{clean_topic}'.\n\n"
             f"GATHERED RESEARCH NOTES:\n{combined_notes}\n\n"
-            f"Format as an executive Markdown dossier with sections: Executive Summary, Key Findings, Technical Details, and Sources Cited."
+            f"Format as an executive Markdown dossier with sections: Executive Summary, Strategic & Historical Architecture, "
+            f"Key Turning Points & Tactical Dilemmas, Executive Lessons for Modern Leadership, and Concluding Analysis."
         )
-        report_md = llm.ask(report_prompt)
+        if hasattr(llm, "synthesize_document"):
+            report_md = llm.synthesize_document(report_prompt)
+        else:
+            report_md = ""
 
-        # 4. Spoken summary
+        if not report_md or len(report_md) < 200:
+            report_md = (
+                f"# Executive Dossier: {clean_topic.title()}\n\n"
+                f"**Generated:** {timestamp} | **Analyst:** J.A.R.V.I.S. Executive Intelligence\n\n"
+                f"## 1. Executive Summary\n\n"
+                f"A comprehensive examination of '{clean_topic}' encompassing core strategic, historical, and philosophical frameworks.\n\n"
+                f"## 2. Gathered Research Findings\n{combined_notes}\n"
+            )
+
+        # 4. Separate spoken summary tailored strictly for natural voice readout
         spoken_prompt = (
-            f"Based on this research on '{clean_topic}', deliver an executive spoken briefing to Tony Stark in 2 concise sentences without markdown or asterisks."
+            f"Based on your complete research on '{clean_topic}', deliver an executive spoken briefing to Tony Stark in 2 concise sentences without markdown or asterisks."
         )
         spoken_summary = llm.ask(spoken_prompt).strip()
     else:

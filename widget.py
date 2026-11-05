@@ -16,6 +16,7 @@ from __future__ import annotations
 import datetime
 import math
 import os
+import random
 import queue
 import sys
 import threading
@@ -63,72 +64,259 @@ def get_system_telemetry() -> dict[str, str]:
         return {"cpu": "14%", "ram": "48%", "bat": "88% AC"}
 
 
+class WobnimoSpring:
+    """Damped harmonic spring solver for organic squash, stretch, and recoil."""
+    def __init__(self, val: float = 0.0, k: float = 260.0, c: float = 22.0):
+        self.x = val
+        self.target = val
+        self.v = 0.0
+        self.k = k
+        self.c = c
+
+    def update(self, dt: float):
+        # Stable semi-implicit Euler integration
+        f = -self.k * (self.x - self.target) - self.c * self.v
+        self.v += f * dt
+        self.x += self.v * dt
+
+    def impulse(self, amt: float):
+        self.v += amt
+
+
+class WobnimoMascot:
+    """Lively 3D TwoCode Robo mascot with spring physics, procedural blinks, and gaze tracking."""
+    def __init__(self):
+        self.squash = WobnimoSpring(1.0, k=280.0, c=20.0)      # X scale (squash/stretch)
+        self.antenna_tilt = WobnimoSpring(0.0, k=220.0, c=16.0) # Antenna angle
+        self.gaze_x = WobnimoSpring(0.0, k=180.0, c=18.0)
+        self.gaze_y = WobnimoSpring(0.0, k=180.0, c=18.0)
+
+        # Procedural Blink state
+        self.next_blink = time.perf_counter() + random.uniform(2.0, 4.5)
+        self.blink_start = 0.0
+        self.blinking = False
+        self.blink_val = 1.0  # 1.0 = fully open, 0.05 = closed slit
+        self.is_double = False
+
+        # Natural gaze saccade timer
+        self.next_saccade = time.perf_counter() + 3.0
+
+        # Celebration timer
+        self.celebrate_until = 0.0
+
+        # References to prevent garbage collection in Tkinter
+        self._ref_compact = None
+        self._ref_expanded = None
+
+    @property
+    def is_celebrating(self) -> bool:
+        return time.perf_counter() < self.celebrate_until
+
+    def trigger_celebrate(self, duration: float = 2.2):
+        self.celebrate_until = time.perf_counter() + duration
+        self.squash.impulse(12.0)
+        self.antenna_tilt.impulse(18.0)
+
+    def trigger_click_wobble(self):
+        """Squash down on interaction and spring recoil."""
+        self.squash.impulse(14.0)
+        self.antenna_tilt.impulse(random.choice([-16.0, 16.0]))
+
+    def trigger_hover(self):
+        """Perk up slightly on mouse hover."""
+        self.squash.impulse(-6.0)
+
+    def update(self, dt: float, mood: str, is_speaking: bool, is_listening: bool, audio_level: float = 0.0):
+        now = time.perf_counter()
+
+        # 1. Step spring physics
+        self.squash.update(dt)
+        self.antenna_tilt.update(dt)
+        self.gaze_x.update(dt)
+        self.gaze_y.update(dt)
+
+        # 2. Audio-reactive bounce during speech
+        if is_speaking:
+            if audio_level > 0.12:
+                bounce_factor = (audio_level - 0.12) * 5.0
+                self.squash.impulse(bounce_factor)
+                self.antenna_tilt.impulse((random.random() - 0.5) * 8.0)
+
+        # 3. Gaze management based on mood
+        if mood in ("thinking", "working"):
+            self.gaze_x.target = 1.6
+            self.gaze_y.target = -1.8
+        elif mood == "listening":
+            self.gaze_x.target = 0.0
+            self.gaze_y.target = 0.0
+        elif mood == "sleeping":
+            self.gaze_x.target = 0.0
+            self.gaze_y.target = 1.0
+        elif mood == "celebrating":
+            self.gaze_x.target = 0.0
+            self.gaze_y.target = -0.6
+        else: # idle
+            if now >= self.next_saccade:
+                self.next_saccade = now + random.uniform(2.5, 6.0)
+                self.gaze_x.target = random.choice([-1.2, 0.0, 0.0, 1.2])
+                self.gaze_y.target = random.choice([-0.8, 0.0, 0.0, 0.8])
+
+        # 4. Blink cycle
+        if not self.blinking:
+            if now >= self.next_blink and mood != "sleeping":
+                self.blinking = True
+                self.blink_start = now
+                self.is_double = (random.random() < 0.22)
+        else:
+            dur = 0.22 if self.is_double else 0.14
+            elapsed = now - self.blink_start
+            if elapsed >= dur:
+                self.blinking = False
+                self.blink_val = 1.0
+                self.next_blink = now + random.uniform(2.5, 5.5)
+            else:
+                p = elapsed / dur
+                if self.is_double:
+                    p2 = p * 2.0
+                    if p2 > 1.0:
+                        p2 -= 1.0
+                    self.blink_val = max(0.06, abs(math.cos(p2 * math.pi)))
+                else:
+                    self.blink_val = max(0.06, abs(math.cos(p * math.pi)))
+
+        if mood == "sleeping":
+            self.blink_val = 0.08  # Soft drooping slit
+
+    def render_face(self, size: int = 40, mood: str = "online", scale: int = 3, phase: float = 0.0) -> Image.Image:
+        s = size * scale
+        cx, cy = s // 2, s // 2
+
+        # Spring squash/stretch factors
+        sq_x = max(0.72, min(1.32, self.squash.x))
+        sq_y = 1.0 / math.sqrt(sq_x)  # Area conservation
+
+        # Idle floating breath
+        float_y = math.sin(phase * 1.5) * (1.8 * scale) if mood != "sleeping" else math.sin(phase * 0.7) * (0.8 * scale)
+        cy = cy + float_y
+
+        img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        gdraw = ImageDraw.Draw(glow)
+
+        # Mood-based colors
+        if mood == "listening":
+            eye_color = (244, 63, 94, 255)
+            glow_color = (244, 63, 94, 150)
+        elif mood in ("thinking", "working"):
+            eye_color = (245, 158, 11, 255)
+            glow_color = (245, 158, 11, 150)
+        elif mood in ("done", "speaking"):
+            eye_color = (16, 185, 129, 255)
+            glow_color = (16, 185, 129, 150)
+        elif mood in ("approval", "curious", "celebrating"):
+            eye_color = (168, 85, 247, 255)
+            glow_color = (168, 85, 247, 160)
+        elif mood == "sleeping":
+            eye_color = (130, 130, 150, 200)
+            glow_color = (80, 80, 110, 80)
+        else: # online / idle
+            eye_color = (245, 245, 245, 255)
+            glow_color = (160, 160, 170, 110)
+
+        # 1. Ambient Glow Aura
+        gdraw.ellipse([cx - s * 0.38 * sq_x, cy - s * 0.28 * sq_y, cx + s * 0.38 * sq_x, cy + s * 0.42 * sq_y], fill=glow_color)
+        glow_blurred = glow.filter(ImageFilter.GaussianBlur(radius=int(5 * scale)))
+
+        # 2. Antenna with Spring Tilt
+        tilt_px = self.antenna_tilt.x * 0.08 * scale
+        ant_top_x = cx + tilt_px
+        ant_top_y = cy - (s * 0.44 * sq_y)
+        ant_stem_w = max(2, int(s * 0.04))
+        draw.line([cx, cy - (s * 0.26 * sq_y), ant_top_x, ant_top_y], fill=(200, 200, 200, 255), width=ant_stem_w)
+
+        ant_r = s * 0.065
+        draw.ellipse([ant_top_x - ant_r, ant_top_y - ant_r, ant_top_x + ant_r, ant_top_y + ant_r], fill=(255, 255, 255, 255), outline=eye_color, width=max(1, int(scale * 1.2)))
+
+        # 3. Ear Cylinders
+        ear_w, ear_h = s * 0.08 * sq_x, s * 0.18 * sq_y
+        draw.rounded_rectangle([cx - s * 0.42 * sq_x, cy - ear_h / 2, cx - s * 0.34 * sq_x, cy + ear_h / 2], radius=int(ear_w / 2), fill=(200, 200, 200, 255))
+        draw.rounded_rectangle([cx + s * 0.34 * sq_x, cy - ear_h / 2, cx + s * 0.42 * sq_x, cy + ear_h / 2], radius=int(ear_w / 2), fill=(200, 200, 200, 255))
+
+        # 4. Head Chassis (Pure white rounded TwoCode robot chassis)
+        hw = s * 0.36 * sq_x
+        hh = s * 0.33 * sq_y
+        head_box = [cx - hw, cy - hh * 0.9, cx + hw, cy + hh * 1.1]
+        draw.ellipse(head_box, fill=(245, 245, 245, 255), outline=(190, 190, 190, 255), width=max(1, int(scale)))
+
+        # 5. Visor Screen
+        vw = s * 0.26 * sq_x
+        vh = s * 0.19 * sq_y
+        visor_box = [cx - vw, cy - vh * 0.7, cx + vw, cy + vh * 1.3]
+        draw.rounded_rectangle(visor_box, radius=int(vh * 0.7), fill=(18, 18, 18, 255), outline=(42, 42, 42, 255), width=max(1, int(scale)))
+
+        # Subtle visor glass glossy reflection
+        draw.arc([cx - vw + scale, cy - vh * 0.7 + scale, cx + vw - scale, cy + vh * 1.3 - scale], start=190, end=350, fill=(70, 70, 70, 100), width=max(1, int(scale)))
+
+        # 6. Eye Rendering with Blinking & Gaze
+        eye_base_w = s * 0.05 * sq_x
+        eye_base_h = s * 0.058 * sq_y * self.blink_val
+        eye_base_h = max(1.0 * scale, eye_base_h)
+
+        gx = self.gaze_x.x * scale
+        gy = self.gaze_y.x * scale
+
+        lx = cx - (s * 0.12 * sq_x) + gx
+        rx = cx + (s * 0.12 * sq_x) + gx
+        ey = cy + (s * 0.04 * sq_y) + gy
+
+        if mood in ("done", "speaking") and self.blink_val > 0.4:
+            # Happy curved arc eyes (Wobnimo smile)
+            arc_w = max(2, int(s * 0.038))
+            draw.arc([lx - eye_base_w, ey - eye_base_h * 1.1, lx + eye_base_w, ey + eye_base_h * 1.1], start=200, end=340, fill=eye_color, width=arc_w)
+            draw.arc([rx - eye_base_w, ey - eye_base_h * 1.1, rx + eye_base_w, ey + eye_base_h * 1.1], start=200, end=340, fill=eye_color, width=arc_w)
+        elif mood in ("thinking", "working") and self.blink_val > 0.4:
+            # Focused rounded rectangle eyes + orbital particle
+            draw.rounded_rectangle([lx - eye_base_w * 1.1, ey - eye_base_h * 0.7, lx + eye_base_w * 1.1, ey + eye_base_h * 0.7], radius=int(eye_base_h * 0.7), fill=eye_color)
+            draw.rounded_rectangle([rx - eye_base_w * 1.1, ey - eye_base_h * 0.7, rx + eye_base_w * 1.1, ey + eye_base_h * 0.7], radius=int(eye_base_h * 0.7), fill=eye_color)
+            # Orbital thinking ring
+            orb_r = s * 0.22
+            orb_x = cx + math.cos(phase * 4.0) * orb_r
+            orb_y = cy + math.sin(phase * 4.0) * (orb_r * 0.6)
+            draw.ellipse([orb_x - 2 * scale, orb_y - 2 * scale, orb_x + 2 * scale, orb_y + 2 * scale], fill=(255, 215, 0, 240))
+        elif mood == "celebrating":
+            # Curved joyful crescent eyes
+            draw.arc([lx - eye_base_w, ey - eye_base_h, lx + eye_base_w, ey + eye_base_h], start=180, end=360, fill=eye_color, width=max(2, int(s * 0.04)))
+            draw.arc([rx - eye_base_w, ey - eye_base_h, rx + eye_base_w, ey + eye_base_h], start=180, end=360, fill=eye_color, width=max(2, int(s * 0.04)))
+        else:
+            # Dynamic blinking oval eyes
+            draw.ellipse([lx - eye_base_w, ey - eye_base_h, lx + eye_base_w, ey + eye_base_h], fill=eye_color)
+            draw.ellipse([rx - eye_base_w, ey - eye_base_h, rx + eye_base_w, ey + eye_base_h], fill=eye_color)
+
+            # Pupil highlight reflection (adds depth and life)
+            if self.blink_val > 0.6:
+                hr = max(1, int(scale * 1.1))
+                draw.ellipse([lx - hr + scale, ey - eye_base_h * 0.5, lx + hr + scale, ey - eye_base_h * 0.5 + hr * 2], fill=(255, 255, 255, 220))
+                draw.ellipse([rx - hr + scale, ey - eye_base_h * 0.5, rx + hr + scale, ey - eye_base_h * 0.5 + hr * 2], fill=(255, 255, 255, 220))
+
+        composite = Image.alpha_composite(glow_blurred, img)
+        return composite.resize((size, size), Image.Resampling.LANCZOS)
+
+    def get_photo_image(self, size: int, mood: str, phase: float) -> ImageTk.PhotoImage:
+        img = self.render_face(size=size, mood=mood, scale=3, phase=phase)
+        photo = ImageTk.PhotoImage(img)
+        if size <= 32:
+            self._ref_compact = photo
+        else:
+            self._ref_expanded = photo
+        return photo
+
+
 def build_twocode_robo_face(size: int = 40, mood: str = "online", scale: int = 3) -> Image.Image:
-    """Pre-render the authentic TwoCode Robo mascot face with vector antialiasing and expressive mood eyes."""
-    s = size * scale
-    cx, cy = s // 2, s // 2
+    """Static fallback for TwoCode Robo mascot face."""
+    mascot = WobnimoMascot()
+    return mascot.render_face(size=size, mood=mood, scale=scale, phase=0.0)
 
-    img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    glow = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    gdraw = ImageDraw.Draw(glow)
-
-    if mood == "listening":
-        eye_color = (244, 63, 94, 255)
-        glow_color = (244, 63, 94, 130)
-    elif mood in ("thinking", "focus", "focused", "working"):
-        eye_color = (245, 158, 11, 255)
-        glow_color = (245, 158, 11, 140)
-    elif mood in ("done", "speaking"):
-        eye_color = (16, 185, 129, 255)
-        glow_color = (16, 185, 129, 140)
-    elif mood in ("approval", "curious"):
-        eye_color = (168, 85, 247, 255)
-        glow_color = (168, 85, 247, 140)
-    else:  # online / idle
-        eye_color = (240, 240, 240, 255)
-        glow_color = (160, 160, 160, 110)
-
-    # 1. Ambient Glow Aura
-    gdraw.ellipse([cx - s * 0.38, cy - s * 0.28, cx + s * 0.38, cy + s * 0.42], fill=glow_color)
-    glow_blurred = glow.filter(ImageFilter.GaussianBlur(radius=int(5 * scale)))
-
-    # 2. Antenna
-    ant_stem_w = max(2, int(s * 0.04))
-    draw.line([cx, cy - s * 0.26, cx, cy - s * 0.42], fill=(200, 200, 200, 255), width=ant_stem_w)
-    ant_r = s * 0.065
-    draw.ellipse([cx - ant_r, cy - s * 0.44 - ant_r, cx + ant_r, cy - s * 0.44 + ant_r], fill=(255, 255, 255, 255), outline=eye_color, width=max(1, int(scale * 1.2)))
-
-    # 3. Ear Cylinders
-    ear_w, ear_h = s * 0.08, s * 0.18
-    draw.rounded_rectangle([cx - s * 0.42, cy - ear_h / 2, cx - s * 0.34, cy + ear_h / 2], radius=int(ear_w / 2), fill=(200, 200, 200, 255))
-    draw.rounded_rectangle([cx + s * 0.34, cy - ear_h / 2, cx + s * 0.42, cy + ear_h / 2], radius=int(ear_w / 2), fill=(200, 200, 200, 255))
-
-    # 4. Head Chassis
-    head_box = [cx - s * 0.36, cy - s * 0.28, cx + s * 0.36, cy + s * 0.38]
-    draw.ellipse(head_box, fill=(245, 245, 245, 255), outline=(190, 190, 190, 255), width=max(1, int(scale)))
-
-    # 5. Dark Visor Screen
-    visor_box = [cx - s * 0.26, cy - s * 0.14, cx + s * 0.26, cy + s * 0.24]
-    draw.rounded_rectangle(visor_box, radius=int(s * 0.14), fill=(18, 18, 18, 255), outline=(38, 38, 38, 255), width=max(1, int(scale)))
-
-    # 6. Eye Rendering based on mood
-    eye_r = s * 0.05
-    lx, rx = cx - s * 0.12, cx + s * 0.12
-    ey = cy + s * 0.04
-
-    if mood in ("done", "speaking"):
-        draw.arc([lx - eye_r, ey - eye_r, lx + eye_r, ey + eye_r], start=200, end=340, fill=eye_color, width=max(2, int(s * 0.035)))
-        draw.arc([rx - eye_r, ey - eye_r, rx + eye_r, ey + eye_r], start=200, end=340, fill=eye_color, width=max(2, int(s * 0.035)))
-    elif mood in ("thinking", "focus", "focused", "working"):
-        draw.rounded_rectangle([lx - eye_r * 1.1, ey - eye_r * 0.6, lx + eye_r * 1.1, ey + eye_r * 0.6], radius=int(eye_r * 0.6), fill=eye_color)
-        draw.rounded_rectangle([rx - eye_r * 1.1, ey - eye_r * 0.6, rx + eye_r * 1.1, ey + eye_r * 0.6], radius=int(eye_r * 0.6), fill=eye_color)
-    else:
-        draw.ellipse([lx - eye_r, ey - eye_r * 1.2, lx + eye_r, ey + eye_r * 1.2], fill=eye_color)
-        draw.ellipse([rx - eye_r, ey - eye_r * 1.2, rx + eye_r, ey + eye_r * 1.2], fill=eye_color)
-
-    composite = Image.alpha_composite(glow_blurred, img)
-    return composite.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def build_twocode_background(w: int, h: int, mood: str = "online", expanded: bool = False, scale: int = 1) -> Image.Image:
@@ -236,7 +424,8 @@ class JarvisIslandWidget:
             self.asst.ctx.widget = self
 
         # Island Dimensions
-        self.W_COMPACT = 170
+        self.W_COMPACT = 118
+        self.W_COMPACT_WAVE = 176
         self.H_COMPACT = 40
         self.W_EXPANDED = 650
         self.H_EXPANDED = 230
@@ -310,6 +499,23 @@ class JarvisIslandWidget:
         # Initialize Root Window (Fixed OS window container at top-center)
         self.root = tk.Tk()
         self.root.title("J.A.R.V.I.S. Island")
+
+        # Set App Icon and Windows AppUserModelID
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("stark.jarvis.windows.island")
+        except Exception:
+            pass
+
+        icon_path = HERE / "jarvis.ico"
+        if icon_path.exists():
+            try:
+                self.root.iconbitmap(default=str(icon_path))
+            except Exception:
+                try:
+                    self.root.wm_iconbitmap(str(icon_path))
+                except Exception:
+                    pass
         self.screen_w = self.root.winfo_screenwidth()
         self.screen_h = self.root.winfo_screenheight()
         self.win_x = int((self.screen_w - self.WIN_W) / 2)
@@ -334,16 +540,12 @@ class JarvisIslandWidget:
         )
         self.canvas.pack(fill="both", expand=True)
 
-        # Pre-render Robo Mascot Faces
-        print("  [Island] Pre-rendering Jarvis Robo vector mascot faces...")
-        self.robo_faces_compact: dict[str, ImageTk.PhotoImage] = {
-            m: ImageTk.PhotoImage(build_twocode_robo_face(28, m))
-            for m in ("online", "listening", "thinking", "speaking", "approval")
-        }
-        self.robo_faces_expanded: dict[str, ImageTk.PhotoImage] = {
-            m: ImageTk.PhotoImage(build_twocode_robo_face(40, m))
-            for m in ("online", "listening", "thinking", "speaking", "approval")
-        }
+        # Living Wobnimo Spring-Physics Mascot
+        print("  [Island] Initializing Wobnimo spring-driven procedural 3D mascot...")
+        self.mascot = WobnimoMascot()
+        self._last_user_activity = time.perf_counter()
+        self.robo_faces_compact: dict[str, ImageTk.PhotoImage] = {}
+        self.robo_faces_expanded: dict[str, ImageTk.PhotoImage] = {}
 
         # Unified Chat Entry Frame (Monochrome Black & Grey)
         self.input_frame = tk.Frame(self.canvas, bg="#101010")
@@ -420,11 +622,20 @@ class JarvisIslandWidget:
 
         # 2. Compact Notch Mascot, Title & Dynamic Audio Waveform
         self.item_compact_robo = self.canvas.create_image(0, 0, tags="btn_notch")
-        self.item_compact_title = self.canvas.create_text(0, 0, text="J.A.R.V.I.S.", font=("Segoe UI", 9, "bold"), fill="#f5f5f5", state="hidden", tags="btn_notch")
-        self.item_compact_status = self.canvas.create_text(0, 0, text="● Ready", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden", tags="btn_notch")
-        self.item_wave_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#f43f5e", state="hidden")
-        self.item_wave_bar2 = self.canvas.create_polygon(0, 0, 0, 0, fill="#f43f5e", state="hidden")
-        self.item_wave_bar3 = self.canvas.create_polygon(0, 0, 0, 0, fill="#f43f5e", state="hidden")
+        self.item_compact_title = self.canvas.create_text(0, 0, anchor="w", text="J.A.R.V.I.S.", font=("Segoe UI", 8, "bold"), fill="#f5f5f5", state="hidden", tags="btn_notch")
+        self.item_compact_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=("Segoe UI", 7), fill="#a3a3a3", state="hidden", tags="btn_notch")
+        self.item_wave_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden", tags="btn_notch")
+        self.item_wave_bar2 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden", tags="btn_notch")
+        self.item_wave_bar3 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden", tags="btn_notch")
+        self.item_wave_bar4 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden", tags="btn_notch")
+        self.canvas.tag_bind("btn_notch", "<Button-1>", lambda e: (self.mascot.trigger_click_wobble(), self.toggle_expand(True)))
+
+        # Waveform Equalizer Bars for Expanded Mode (Top-Right of AI Assistant Card)
+        self.exp_wave_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
+        self.exp_wave_bar2 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
+        self.exp_wave_bar3 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
+        self.exp_wave_bar4 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
+        self.exp_wave_bar5 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
 
         # 3. Top Header Bar (Expanded Mode)
         self.item_header_logo = self.canvas.create_text(18, 15, anchor="w", text="J.A.R.V.I.S.", font=("Segoe UI", 8, "bold"), fill="#737373", state="hidden")
@@ -433,6 +644,7 @@ class JarvisIslandWidget:
 
         # 4. Left AI Assistant Card
         self.item_agent_robo = self.canvas.create_image(0, 0, tags="btn_robo", state="hidden")
+        self.canvas.tag_bind("btn_robo", "<Button-1>", lambda e: self.mascot.trigger_click_wobble())
         self.item_agent_title = self.canvas.create_text(0, 0, anchor="w", text="Jarvis Assistant", font=("Segoe UI", 10, "bold"), fill="#f5f5f5", state="hidden")
         self.item_agent_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden")
 
@@ -475,6 +687,12 @@ class JarvisIslandWidget:
 
     def _on_entry_focus_in(self, event):
         self._cancel_collapse_timer()
+        if hasattr(self, "_reset_timer_id") and self._reset_timer_id is not None:
+            try:
+                self.root.after_cancel(self._reset_timer_id)
+            except Exception:
+                pass
+            self._reset_timer_id = None
         self.hover_expanded = False
         if self._placeholder_active:
             self.entry_var.set("")
@@ -532,39 +750,59 @@ class JarvisIslandWidget:
             self._reset_timer_id = None
 
         self._active_speech_id = speech_id
+        self.is_listening = False
         self.last_reply = str(text or "")
         self.status_label = "Speaking"
         self.status_color = "#10b981"
         self.is_speaking = True
         self.is_thinking = False
-        if not self.expanded:
-            self.temp_expanded_for_speech = True
-            self.expanded = True
+        # If in compact pill mode, stay compact: pill will smoothly spring open to 176px to reveal the audio waveform!
         self._recompute_target_size()
 
     def _on_speaking_finished(self, speech_id: float, duration: float):
         if getattr(self, "_active_speech_id", None) != speech_id:
             return
         self.is_speaking = False
+        self.is_listening = False
         self.status_label = "Ready"
         self.status_color = "#a3a3a3"
-        self._reset_timer_id = self.root.after(1200, lambda: self._revert_after_speech(speech_id))
+        self._recompute_target_size()
+        # Collapse to pill after response has finished speaking out
+        self._reset_timer_id = self.root.after(1500, lambda: self._revert_after_speech(speech_id))
 
     def _revert_after_speech(self, speech_id: float):
         if getattr(self, "_active_speech_id", None) != speech_id:
             return
         self._reset_timer_id = None
-        if getattr(self, "temp_expanded_for_speech", False):
-            self.temp_expanded_for_speech = False
-            self.expanded = False
+        self.is_listening = False
+        self.is_speaking = False
+        self.temp_expanded_for_speech = False
+
+        # Don't auto-collapse if user is actively speaking or another query is running
+        if self.is_listening or self.is_thinking or self.is_speaking:
+            return
+
+        # Don't auto-collapse if user is actively typing a command in the input box
+        if not getattr(self, "_placeholder_active", True) and self.entry_var.get().strip():
+            return
+
+        # Don't auto-collapse if interactive approval chip (Yes / No) is awaiting user confirmation
+        has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None))
+        if has_approval:
+            return
+
+        # Collapse back to compact pill after 2 seconds
+        if self.expanded:
+            self.toggle_expand(False)
         self._reset_status()
 
     def _reset_status(self):
-        if not self.is_listening and not self.is_thinking and not self.is_speaking:
-            self.status_label = "Ready"
-            self.status_color = "#a3a3a3"
-            self.is_speaking = False
-            self._recompute_target_size()
+        self.is_listening = False
+        self.is_speaking = False
+        self.is_thinking = False
+        self.status_label = "Ready"
+        self.status_color = "#a3a3a3"
+        self._recompute_target_size()
 
     def _start_transition(self, target_w: float, target_h: float, is_expanding: bool | None = None):
         if abs(self.cur_w - target_w) < 0.5 and abs(self.cur_h - target_h) < 0.5 and abs(self.vel_w) < 1.0 and abs(self.vel_h) < 1.0:
@@ -583,15 +821,16 @@ class JarvisIslandWidget:
         self._last_tick_time = time.perf_counter()
 
     def _recompute_target_size(self):
-        has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None))
+        has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None) or getattr(self.asst, "pending_memory_cleanup", False))
         if not self.expanded:
-            # If listening in compact mode, spring open into a wider listening pill (96px)
-            if self.is_listening:
-                tw = 96.0
+            # Dynamic horizontal bloom: 118px resting -> 176px when waveform is active (speaking or listening)
+            is_active_wave = bool(self.is_speaking or (self.is_listening and self.status_label == "Listening"))
+            if is_active_wave:
+                tw = float(self.W_COMPACT_WAVE)
             else:
                 tw = float(self.W_COMPACT)
             th = float(self.H_COMPACT)
-            expanding = self.is_listening
+            expanding = is_active_wave
         else:
             tw = float(self.W_EXPANDED)
             base_h = float(self.H_EXPANDED)
@@ -695,10 +934,13 @@ class JarvisIslandWidget:
             "clipboard_action": "📋 Clipboard",
             "daily_digest": "🌅 Briefing",
             "email_summary": "📬 Inbox",
+            "youtube_summary": "📺 YouTube",
+            "summarize_youtube_video": "📺 YouTube",
         }.get(name, f"⚙️ {name}" if name else None)
         self._post_ui(lambda: self._set_tool_badge_ui(friendly))
 
     def _set_tool_badge_ui(self, badge_text: str | None):
+        was_working = bool(self.current_tool_badge)
         self.current_tool_badge = badge_text
         if badge_text:
             self.status_label = "Working"
@@ -708,6 +950,8 @@ class JarvisIslandWidget:
             self.status_label = "Ready"
             self.status_color = "#a3a3a3"
             self.is_thinking = False
+            if was_working:
+                self.mascot.trigger_celebrate(2.2)
         self._recompute_target_size()
 
     def _on_approve_click(self):
@@ -965,6 +1209,32 @@ class JarvisIslandWidget:
             self._cur_cpu_pct += (self._target_cpu_pct - self._cur_cpu_pct) * 0.12
             self._cur_ram_pct += (self._target_ram_pct - self._cur_ram_pct) * 0.12
 
+            # Determine mood for Wobnimo mascot
+            has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None))
+            if self.mascot.is_celebrating:
+                current_mood = "celebrating"
+            elif has_approval:
+                current_mood = "approval"
+            elif self.is_listening and self.status_label == "Listening":
+                current_mood = "listening"
+            elif self.is_speaking:
+                current_mood = "speaking"
+            elif self.is_thinking:
+                current_mood = "thinking"
+            elif (now - getattr(self, "_last_user_activity", now)) > 300.0:
+                current_mood = "sleeping"
+            else:
+                current_mood = "online"
+
+            # Step Wobnimo spring physics & procedural animations
+            self.mascot.update(
+                dt=dt,
+                mood=current_mood,
+                is_speaking=self.is_speaking,
+                is_listening=self.is_listening,
+                audio_level=self._smooth_audio_level
+            )
+
             # Smooth live audio level tracking for waveform visualizer
             try:
                 import audio
@@ -1021,14 +1291,19 @@ class JarvisIslandWidget:
             return
 
         has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None))
-        if has_approval:
+        now = time.perf_counter()
+        if self.mascot.is_celebrating:
+            mood = "celebrating"
+        elif has_approval:
             mood = "approval"
-        elif self.is_listening:
+        elif self.is_listening and self.status_label == "Listening":
             mood = "listening"
         elif self.is_speaking:
             mood = "speaking"
         elif self.is_thinking:
             mood = "thinking"
+        elif (now - getattr(self, "_last_user_activity", now)) > 300.0:
+            mood = "sleeping"
         else:
             mood = "online"
 
@@ -1043,49 +1318,66 @@ class JarvisIslandWidget:
         # ----------------------------------------------------------------------
         # COMPACT NOTCH MODE (Docked at top bezel)
         # ----------------------------------------------------------------------
-        if not self.expanded and w <= 120:
+        if not self.expanded:
             self.input_frame.place_forget()
+            if hasattr(self, "reply_frame"):
+                self.reply_frame.place_forget()
             self._hide_expanded_items()
+            for b in (getattr(self, "exp_wave_bar1", None), getattr(self, "exp_wave_bar2", None),
+                      getattr(self, "exp_wave_bar3", None), getattr(self, "exp_wave_bar4", None),
+                      getattr(self, "exp_wave_bar5", None)):
+                if b is not None:
+                    self.canvas.itemconfig(b, state="hidden")
 
-            robo_img = self.robo_faces_compact.get(mood, self.robo_faces_compact["online"])
+            robo_img = self.mascot.get_photo_image(size=28, mood=mood, phase=self._anim_phase)
+            self.canvas.coords(self.item_compact_robo, island_x + 20, island_y + h / 2)
             self.canvas.itemconfig(self.item_compact_robo, image=robo_img, state="normal")
 
-            if self.is_listening and w > self.W_COMPACT + 8:
-                # Dynamic Listening Pill: Mascot on left, animated Siri waveform on right
-                self.canvas.coords(self.item_compact_robo, island_x + 22, island_y + h / 2)
+            self.canvas.coords(self.item_compact_title, island_x + 38, island_y + 12)
+            self.canvas.itemconfig(self.item_compact_title, text="J.A.R.V.I.S.", state="normal")
 
+            badge_txt = self.current_tool_badge or f"● {self.status_label}"
+            self.canvas.coords(self.item_compact_status, island_x + 38, island_y + 26)
+            self.canvas.itemconfig(self.item_compact_status, text=badge_txt, fill=self.status_color, state="normal")
+
+            is_active_listening = (self.is_listening and self.status_label == "Listening")
+            if is_active_listening or self.is_speaking:
                 cy = island_y + h / 2
-                bx = island_x + 50.0
-                level = min(1.0, max(0.08, self._smooth_audio_level * 180.0))
+                bx = island_x + w - 24.0
+                wave_color = "#f43f5e" if is_active_listening else "#10b981"
+                if self.is_speaking:
+                    speech_mod = 0.55 + 0.35 * math.sin(self._anim_phase * 3.2) + 0.15 * math.cos(self._anim_phase * 6.5)
+                    level = max(0.25, min(1.0, speech_mod))
+                else:
+                    level = min(1.0, max(0.15, self._smooth_audio_level * 180.0))
 
-                h1 = max(4.0, min(22.0, 6.0 + 12.0 * level * abs(math.sin(self._anim_phase * 4.0))))
-                h2 = max(6.0, min(26.0, 8.0 + 16.0 * level * abs(math.sin(self._anim_phase * 4.0 + 1.2))))
-                h3 = max(4.0, min(22.0, 6.0 + 12.0 * level * abs(math.sin(self._anim_phase * 4.0 + 2.4))))
+                c_bars = (self.item_wave_bar1, self.item_wave_bar2, self.item_wave_bar3, self.item_wave_bar4)
+                c_offsets = (-9.0, -3.0, 3.0, 9.0)
+                c_freqs = (4.5, 5.8, 3.9, 6.2)
+                c_phases = (0.0, 1.2, 2.4, 3.6)
 
-                pts_b1 = _rounded_rect_points(bx, cy - h1/2, bx + 3.5, cy + h1/2, r=1.5)
-                pts_b2 = _rounded_rect_points(bx + 7.5, cy - h2/2, bx + 11.0, cy + h2/2, r=1.5)
-                pts_b3 = _rounded_rect_points(bx + 15.0, cy - h3/2, bx + 18.5, cy + h3/2, r=1.5)
-
-                self.canvas.coords(self.item_wave_bar1, pts_b1)
-                self.canvas.coords(self.item_wave_bar2, pts_b2)
-                self.canvas.coords(self.item_wave_bar3, pts_b3)
-
-                for itm in (self.item_wave_bar1, self.item_wave_bar2, self.item_wave_bar3):
-                    self.canvas.itemconfig(itm, fill="#f43f5e", state="normal")
+                for bar_item, off, freq, p_off in zip(c_bars, c_offsets, c_freqs, c_phases):
+                    bh = max(3.5, min(18.0, 4.5 + 13.0 * level * abs(math.sin(self._anim_phase * freq + p_off))))
+                    pts = _rounded_rect_points(bx + off - 1.25, cy - bh / 2, bx + off + 1.25, cy + bh / 2, r=1.25)
+                    self.canvas.coords(bar_item, pts)
+                    self.canvas.itemconfig(bar_item, fill=wave_color, state="normal")
             else:
-                self.canvas.coords(self.item_compact_robo, island_x + w / 2, island_y + h / 2)
-                self.canvas.itemconfig(self.item_wave_bar1, state="hidden")
-                self.canvas.itemconfig(self.item_wave_bar2, state="hidden")
-                self.canvas.itemconfig(self.item_wave_bar3, state="hidden")
+                for itm in (self.item_wave_bar1, self.item_wave_bar2, self.item_wave_bar3, self.item_wave_bar4):
+                    self.canvas.itemconfig(itm, state="hidden")
 
-            self.canvas.itemconfig(self.item_compact_title, state="hidden")
-            self.canvas.itemconfig(self.item_compact_status, state="hidden")
             return
 
-        # Hide compact notch mascot
+        # Hide compact notch items when expanded
         self.canvas.itemconfig(self.item_compact_robo, state="hidden")
         self.canvas.itemconfig(self.item_compact_title, state="hidden")
         self.canvas.itemconfig(self.item_compact_status, state="hidden")
+        for b in (self.item_wave_bar1, self.item_wave_bar2, self.item_wave_bar3, getattr(self, "item_wave_bar4", None),
+                  getattr(self, "exp_wave_bar1", None), getattr(self, "exp_wave_bar2", None),
+                  getattr(self, "exp_wave_bar3", None), getattr(self, "exp_wave_bar4", None),
+                  getattr(self, "exp_wave_bar5", None)):
+            if b is not None:
+                self.canvas.itemconfig(b, state="hidden")
+        self.canvas.itemconfig(self.item_wave_bar4, state="hidden")
 
         # Subtle 50ms stagger delay for internal elements during expansion
         is_animating = getattr(self, "_animating", False)
@@ -1118,7 +1410,7 @@ class JarvisIslandWidget:
         gap = 10
 
         # 1. Left Card: AI Assistant
-        robo_img = self.robo_faces_expanded.get(mood, self.robo_faces_expanded["online"])
+        robo_img = self.mascot.get_photo_image(size=40, mood=mood, phase=self._anim_phase)
         self.canvas.coords(self.item_agent_robo, left_x + 24, top_bar_h + 24)
         self.canvas.itemconfig(self.item_agent_robo, image=robo_img, state="normal")
 
@@ -1127,6 +1419,32 @@ class JarvisIslandWidget:
         self.canvas.itemconfig(self.item_agent_title, state="normal")
         self.canvas.coords(self.item_agent_status, left_x + 50, top_bar_h + 31)
         self.canvas.itemconfig(self.item_agent_status, text=badge_txt, fill=self.status_color, state="normal")
+
+        # Dynamic Audio Waveform Equalizer in Expanded Card Header (while Speaking or Listening)
+        is_active_listening = (self.is_listening and self.status_label == "Listening")
+        exp_bars = (self.exp_wave_bar1, self.exp_wave_bar2, self.exp_wave_bar3, self.exp_wave_bar4, self.exp_wave_bar5)
+        if self.is_speaking or is_active_listening:
+            bx = left_x + left_w - 30.0
+            cy = top_bar_h + 24.0
+            wave_color = "#10b981" if self.is_speaking else "#f43f5e"
+            if self.is_speaking:
+                speech_mod = 0.55 + 0.35 * math.sin(self._anim_phase * 3.2) + 0.15 * math.cos(self._anim_phase * 6.5)
+                level = max(0.25, min(1.0, speech_mod))
+            else:
+                level = min(1.0, max(0.15, self._smooth_audio_level * 180.0))
+
+            offsets = (-11.0, -5.5, 0.0, 5.5, 11.0)
+            freqs = (4.2, 5.8, 3.9, 6.2, 4.7)
+            phase_offsets = (0.0, 1.1, 2.3, 3.4, 4.6)
+
+            for bar_item, off, freq, p_off in zip(exp_bars, offsets, freqs, phase_offsets):
+                bh = max(4.0, min(22.0, 5.0 + 16.0 * level * abs(math.sin(self._anim_phase * freq + p_off))))
+                pts = _rounded_rect_points(bx + off - 1.5, cy - bh / 2, bx + off + 1.5, cy + bh / 2, r=1.5)
+                self.canvas.coords(bar_item, pts)
+                self.canvas.itemconfig(bar_item, fill=wave_color, state="normal")
+        else:
+            for bar_item in exp_bars:
+                self.canvas.itemconfig(bar_item, state="hidden")
 
         # Input capsule inside left card
         input_y = top_bar_h + 52
@@ -1149,7 +1467,19 @@ class JarvisIslandWidget:
         card_bottom = top_bar_h + left_h
 
         if has_approval and left_w >= 140:
-            app_lbl, den_lbl = "✓ Yes", "✕ No"
+            if getattr(self.asst, "pending_url", None):
+                raw_lbl = getattr(self.asst, "pending_label", "") or "Google"
+                clean_lbl = raw_lbl if len(raw_lbl) <= 15 else f"{raw_lbl[:13]}.."
+                app_lbl = f"🔗 View on {clean_lbl}"
+                den_lbl = "✕ Dismiss"
+            elif getattr(self.asst, "pending_memory_cleanup", False):
+                app_lbl = "✓ Optimize"
+                den_lbl = "✕ Dismiss"
+            elif getattr(self.asst, "pending_briefing", False):
+                app_lbl = "✓ Start Briefing"
+                den_lbl = "✕ Not Now"
+            else:
+                app_lbl, den_lbl = "✓ Yes", "✕ No"
 
             # Equal balanced clean button widths for Yes and No
             app_w = max(68.0, self.font_chip_bold.measure(app_lbl) + 30.0)
@@ -1390,12 +1720,20 @@ class JarvisIslandWidget:
         self.canvas.itemconfig(self.item_wave_bar1, state="hidden")
         self.canvas.itemconfig(self.item_wave_bar2, state="hidden")
         self.canvas.itemconfig(self.item_wave_bar3, state="hidden")
+        if hasattr(self, "item_wave_bar4"):
+            self.canvas.itemconfig(self.item_wave_bar4, state="hidden")
+        for b in (getattr(self, "exp_wave_bar1", None), getattr(self, "exp_wave_bar2", None),
+                  getattr(self, "exp_wave_bar3", None), getattr(self, "exp_wave_bar4", None),
+                  getattr(self, "exp_wave_bar5", None)):
+            if b is not None:
+                self.canvas.itemconfig(b, state="hidden")
         self.chip_approve_bbox = None
         self.chip_deny_bbox = None
 
     def on_send(self):
         self._cancel_collapse_timer()
         self.hover_expanded = False
+        self.is_listening = False
         text = self.entry_var.get().strip()
         if not text or self._placeholder_active:
             return
@@ -1462,8 +1800,9 @@ class JarvisIslandWidget:
                 compute_type=os.environ.get("WHISPER_COMPUTE", "int8"),
             )
             phrase = listener.record_phrase()
+            self.is_listening = False
             if phrase is not None and len(phrase) > 0:
-                self._post_ui(lambda: setattr(self, "status_label", "Thinking"))
+                self._post_ui(self._set_status_thinking)
                 text = transcribe(phrase).strip()
                 if text and text.lower() not in NOISE_PHRASES:
                     self._post_ui(lambda: self._handle_voice_text(text))
@@ -1475,10 +1814,30 @@ class JarvisIslandWidget:
             self.is_listening = False
             self._post_ui(lambda: self._update_speech("Microphone is currently unavailable."))
         finally:
+            self.is_listening = False
             if listener:
-                listener.close()
+                try:
+                    listener.close()
+                except Exception:
+                    pass
+
+    def _set_status_thinking(self):
+        self.is_listening = False
+        self.is_thinking = True
+        self.status_label = "Thinking"
+        self.status_color = "#f59e0b"
+        self._recompute_target_size()
+
+    def _update_speech(self, text: str):
+        self.is_listening = False
+        self.last_reply = text
+        self._reset_status()
+        if hasattr(self.asst, "speaker") and self.asst.speaker:
+            import threading
+            threading.Thread(target=self.asst.speak, args=(text,), daemon=True).start()
 
     def _handle_voice_text(self, text: str):
+        self.is_listening = False
         self.last_query = text
         self.status_label = "Working"
         self.status_color = "#f59e0b"
@@ -1489,6 +1848,12 @@ class JarvisIslandWidget:
 
     def _on_canvas_click(self, event):
         self._cancel_collapse_timer()
+        if hasattr(self, "_reset_timer_id") and self._reset_timer_id is not None:
+            try:
+                self.root.after_cancel(self._reset_timer_id)
+            except Exception:
+                pass
+            self._reset_timer_id = None
         x, y = event.x, event.y
         w = int(self.cur_w)
         h = int(self.cur_h)
@@ -1579,6 +1944,7 @@ def launch_widget(asst: Assistant | None = None):
 
 # Backward compatibility alias
 TwoCodeIslandWidget = JarvisIslandWidget
+DynamicIslandWidget = JarvisIslandWidget
 
 
 if __name__ == "__main__":
