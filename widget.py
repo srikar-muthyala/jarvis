@@ -593,6 +593,8 @@ class JarvisIslandWidget:
         self.font_chip_bold = tkfont.Font(family="Segoe UI", size=8, weight="bold")
         self.font_chip_norm = tkfont.Font(family="Segoe UI", size=8)
         self.font_clock = tkfont.Font(family="Segoe UI", size=15, weight="bold")
+        self.font_compact_title = tkfont.Font(family="Segoe UI", size=8, weight="bold")
+        self.font_compact_status = tkfont.Font(family="Segoe UI", size=7)
 
         # Canvas items
         self._init_canvas_items()
@@ -616,14 +618,32 @@ class JarvisIslandWidget:
         # Check for first daily run to prompt for morning briefing
         self.root.after(1200, self._check_first_daily_run)
 
+    def _truncate_text_to_width(self, text: str, font: tkfont.Font, max_width_px: int) -> str:
+        """Safely truncate text with ellipsis if it exceeds max_width_px."""
+        if not text:
+            return ""
+        try:
+            if font.measure(text) <= max_width_px:
+                return text
+            ell = "…"
+            ell_w = font.measure(ell)
+            if ell_w >= max_width_px:
+                return ""
+            cur = text
+            while cur and (font.measure(cur + ell) > max_width_px):
+                cur = cur[:-1]
+            return (cur + ell) if cur else ell
+        except Exception:
+            return text[:12]
+
     def _init_canvas_items(self):
         # 1. Background image
         self.item_bg = self.canvas.create_image(0, 0, anchor="nw")
 
         # 2. Compact Notch Mascot, Title & Dynamic Audio Waveform
         self.item_compact_robo = self.canvas.create_image(0, 0, tags="btn_notch")
-        self.item_compact_title = self.canvas.create_text(0, 0, anchor="w", text="J.A.R.V.I.S.", font=("Segoe UI", 8, "bold"), fill="#f5f5f5", state="hidden", tags="btn_notch")
-        self.item_compact_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=("Segoe UI", 7), fill="#a3a3a3", state="hidden", tags="btn_notch")
+        self.item_compact_title = self.canvas.create_text(0, 0, anchor="w", text="J.A.R.V.I.S.", font=self.font_compact_title, fill="#f5f5f5", state="hidden", tags="btn_notch")
+        self.item_compact_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=self.font_compact_status, fill="#a3a3a3", state="hidden", tags="btn_notch")
         self.item_wave_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden", tags="btn_notch")
         self.item_wave_bar2 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden", tags="btn_notch")
         self.item_wave_bar3 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden", tags="btn_notch")
@@ -828,9 +848,17 @@ class JarvisIslandWidget:
             if is_active_wave:
                 tw = float(self.W_COMPACT_WAVE)
             else:
-                tw = float(self.W_COMPACT)
+                # Calculate needed width for text content in compact mode
+                badge_txt = self.current_tool_badge or f"● {self.status_label}"
+                try:
+                    title_w = self.font_compact_title.measure("J.A.R.V.I.S.")
+                    badge_w = self.font_compact_status.measure(badge_txt)
+                    needed_w = 38.0 + max(title_w, badge_w) + 18.0
+                    tw = max(float(self.W_COMPACT), min(float(self.W_COMPACT_WAVE), needed_w))
+                except Exception:
+                    tw = float(self.W_COMPACT)
             th = float(self.H_COMPACT)
-            expanding = is_active_wave
+            expanding = (tw > self.cur_w)
         else:
             tw = float(self.W_EXPANDED)
             base_h = float(self.H_EXPANDED)
@@ -927,16 +955,77 @@ class JarvisIslandWidget:
         self.canvas.config(cursor="hand2" if is_clickable else "")
 
     def set_tool_badge(self, name: str | None):
-        friendly = {
-            "browse_page": "⚡ Lightpanda",
-            "screen_vision": "👁️ Vision",
-            "deep_research": "🔬 Research",
-            "clipboard_action": "📋 Clipboard",
-            "daily_digest": "🌅 Briefing",
+        friendly_map = {
+            # Email
+            "read_and_summarize_email": "📬 Email",
+            "search_email": "📬 Search Mail",
+            "search_emails": "📬 Search Mail",
+            "read_recent_emails": "📬 Email",
+            "read_email_content": "📬 Email",
+            "open_email_link": "🔗 Email Link",
             "email_summary": "📬 Inbox",
+            # Web & Research
+            "web_search": "🌐 Search",
+            "browse_web_page": "🌐 Reading",
+            "browse_page": "⚡ Lightpanda",
+            "read_web_page": "🌐 Reading",
+            "deep_research": "🔬 Research",
+            "research": "🔬 Research",
+            # Vision & Screen
+            "screen_vision": "👁️ Vision",
+            "look_at_screen": "👁️ Vision",
+            "analyze_screen": "👁️ Vision",
+            # System & Hardware
+            "optimize_memory": "⚡ Memory",
+            "clean_memory": "⚡ Memory",
+            "free_memory": "⚡ Memory",
+            "get_battery_status": "🔋 Battery",
+            "battery_status": "🔋 Battery",
+            "get_system_stats": "📊 System",
+            "system_stats": "📊 System",
+            "system_control": "⚙️ System",
+            "control_volume": "🔊 Volume",
+            "set_timer": "⏱️ Timer",
+            "get_time_date": "🕒 Time",
+            "manage_autostart": "⚡ Auto-Boot",
+            "autostart": "⚡ Auto-Boot",
+            "toggle_autostart": "⚡ Auto-Boot",
+            # Apps & Media
+            "open_app": "🚀 App",
+            "close_app": "✕ Close",
+            "open_website": "🌐 Website",
+            "open_folder": "📂 Folder",
+            "create_folder": "📁 Folder",
+            "play_youtube_video": "▶️ YouTube",
             "youtube_summary": "📺 YouTube",
             "summarize_youtube_video": "📺 YouTube",
-        }.get(name, f"⚙️ {name}" if name else None)
+            "summarize_video": "📺 YouTube",
+            "media_control": "🎵 Media",
+            # Productivity
+            "clipboard_action": "📋 Clipboard",
+            "clipboard": "📋 Clipboard",
+            "daily_digest": "🌅 Briefing",
+            "get_daily_digest": "🌅 Briefing",
+            "get_weather": "☀️ Weather",
+            "weather": "☀️ Weather",
+            "get_calendar_events": "📅 Calendar",
+            "calendar": "📅 Calendar",
+            "get_calendar": "📅 Calendar",
+            "get_tasks": "📋 Tasks",
+            "list_tasks": "📋 Tasks",
+            "add_task": "📋 Task",
+            "create_task": "📋 Task",
+        }
+        if name:
+            if name in friendly_map:
+                friendly = friendly_map[name]
+            else:
+                clean_name = name.replace("_", " ").strip().title()
+                if len(clean_name) > 13:
+                    clean_name = clean_name[:12].rstrip() + "…"
+                friendly = f"⚙️ {clean_name}"
+        else:
+            friendly = None
         self._post_ui(lambda: self._set_tool_badge_ui(friendly))
 
     def _set_tool_badge_ui(self, badge_text: str | None):
@@ -1333,12 +1422,18 @@ class JarvisIslandWidget:
             self.canvas.coords(self.item_compact_robo, island_x + 20, island_y + h / 2)
             self.canvas.itemconfig(self.item_compact_robo, image=robo_img, state="normal")
 
+            is_active_listening = (self.is_listening and self.status_label == "Listening")
+            is_active_wave = bool(is_active_listening or self.is_speaking)
+            available_w = max(24, int(w) - 38 - (42 if is_active_wave else 18))
+
+            displayed_title = self._truncate_text_to_width("J.A.R.V.I.S.", self.font_compact_title, available_w)
             self.canvas.coords(self.item_compact_title, island_x + 38, island_y + 12)
-            self.canvas.itemconfig(self.item_compact_title, text="J.A.R.V.I.S.", state="normal")
+            self.canvas.itemconfig(self.item_compact_title, text=displayed_title, state="normal")
 
             badge_txt = self.current_tool_badge or f"● {self.status_label}"
+            displayed_badge = self._truncate_text_to_width(badge_txt, self.font_compact_status, available_w)
             self.canvas.coords(self.item_compact_status, island_x + 38, island_y + 26)
-            self.canvas.itemconfig(self.item_compact_status, text=badge_txt, fill=self.status_color, state="normal")
+            self.canvas.itemconfig(self.item_compact_status, text=displayed_badge, fill=self.status_color, state="normal")
 
             is_active_listening = (self.is_listening and self.status_label == "Listening")
             if is_active_listening or self.is_speaking:
@@ -1783,6 +1878,7 @@ class JarvisIslandWidget:
             self.status_label = "Listening"
             self.status_color = "#f43f5e"
             threading.Thread(target=self._listen_worker, daemon=True).start()
+        self._recompute_target_size()
 
     def _listen_worker(self):
         listener = None
