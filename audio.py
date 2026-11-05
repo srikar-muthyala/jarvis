@@ -5,6 +5,7 @@ import collections
 import ctypes
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -285,6 +286,18 @@ class Transcriber:
         return " ".join(s.text.strip() for s in segments).strip()
 
 
+def clean_urls_for_speech(text: str) -> str:
+    """Ensure raw web URLs are never vocalized character-by-character by TTS engines."""
+    if not text:
+        return ""
+    t = re.sub(r"\b(?:at|from|on|in|via|visit|see|check out)\s+https?://\S+", "in that link", text, flags=re.IGNORECASE)
+    t = re.sub(r"https?://\S+", "that link", t, flags=re.IGNORECASE)
+    t = re.sub(r"\bwww\.[a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+(?:/\S*)?", "that link", t, flags=re.IGNORECASE)
+    t = re.sub(r"\s+", " ", t).strip()
+    t = re.sub(r"\s+([.,!?])", r"\1", t)
+    return t
+
+
 class Speaker:
     """Text to speech through high-definition British neural voice (Jarvis).
 
@@ -496,8 +509,9 @@ class Speaker:
     def speak(self, text: str, wait: bool = True):
         if not text:
             return
+        clean_text = clean_urls_for_speech(text)
         done = threading.Event()
-        self.q.put((text, done))
+        self.q.put((clean_text, done))
         if wait:
             done.wait(60)
 
@@ -514,4 +528,5 @@ class ConsoleSpeaker:
 
     def speak(self, text: str, wait: bool = True):
         if text:
-            print(f"{self.name}: {text}")
+            clean = clean_urls_for_speech(text)
+            print(f"{self.name}: {clean}")

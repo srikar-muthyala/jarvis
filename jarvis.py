@@ -50,6 +50,52 @@ def beep(freq: int = 880, ms: int = 120) -> None:
         pass
 
 
+def sanitize_spoken_urls(text: str) -> tuple[str, str | None, str | None]:
+    """
+    Sanitize raw URLs out of text so Jarvis never spells out web addresses aloud.
+    Returns (cleaned_text, first_url, domain_label).
+    """
+    if not text:
+        return text, None, None
+
+    url_pattern = r'\b((?:https?://)?(?:[a-zA-Z0-9-]+\.)+(?:io|com|org|net|ai|dev|app|co|in|edu|gov|me|info)(?:/[^\s,!?\'"\]\)]*)?)\b'
+    m = re.search(url_pattern, text, re.IGNORECASE)
+    if not m:
+        return text, None, None
+
+    raw_url = m.group(1).rstrip(".")
+    domain = re.sub(r"^https?://", "", raw_url).split("/")[0]
+    full_url = raw_url if raw_url.startswith("http") else f"https://{raw_url}"
+
+    # Replace "at/from/on/in/via/visit/see/check out <URL>" with "in that link"
+    cleaned = re.sub(
+        r"\b(?:at|from|on|in|via|visit|see|check out)\s+" + re.escape(raw_url),
+        "in that link",
+        text,
+        flags=re.IGNORECASE
+    )
+    # If the URL is still present anywhere else, replace with "that link"
+    cleaned = cleaned.replace(raw_url, "that link")
+
+    # Clean any other remaining URLs in the text
+    cleaned = re.sub(
+        r"\b(?:at|from|on|in|via|visit|see|check out)\s+https?://\S+",
+        "in that link",
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    cleaned = re.sub(r"https?://\S+", "that link", cleaned, flags=re.IGNORECASE)
+
+    # Clean up whitespace and punctuation
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = re.sub(r"\s+([.,!?])", r"\1", cleaned)
+
+    if cleaned.lower().startswith("that link"):
+        cleaned = "It is in " + cleaned
+
+    return cleaned, full_url, domain
+
+
 class Assistant:
     def __init__(self, speaker, apps, llm, names, dry_run=False):
         self.speaker, self.llm, self.names = speaker, llm, names
@@ -109,24 +155,19 @@ class Assistant:
             self.pending_label = getattr(self.ctx, "last_search_label", "Google Search") or "Google Search"
             self.ctx.last_search_url = None
 
-        # If Jarvis is already actively opening/launching something, do NOT prompt to open it
-        if re.search(r"\b(?:opening|launching|navigating to|visiting|starting|opened|launched)\b", reply, re.IGNORECASE):
-            self.pending_url = None
-            self.pending_label = None
-            self.speaker.speak(reply)
-            return
-
-        m = re.search(
-            r"\b((?:https?://)?(?:[a-zA-Z0-9-]+\.)+(?:io|com|org|net|ai|dev|app|co|in|edu|gov|me|info)(?:/[^\s,!?\"')\]]*)?)\b",
-            reply,
-            re.IGNORECASE
-        )
-        if m:
-            raw_url = m.group(1).rstrip(".")
-            domain = re.sub(r"^https?://", "", raw_url).split("/")[0]
-            full_url = raw_url if raw_url.startswith("http") else f"https://{raw_url}"
+        # Check for URLs, extract for pending interactive confirmation, and sanitize spoken text
+        cleaned_reply, full_url, domain = sanitize_spoken_urls(reply)
+        if full_url:
             self.pending_url = full_url
             self.pending_label = domain
+            reply = cleaned_reply
+
+            # If Jarvis is already actively opening/launching something, do NOT prompt to open it
+            if re.search(r"\b(?:opening|launching|navigating to|visiting|starting|opened|launched)\b", reply, re.IGNORECASE):
+                self.pending_url = None
+                self.pending_label = None
+                self.speaker.speak(reply)
+                return
 
             already_asks = bool(re.search(
                 r"(?:open (?:the |that )?(?:link|website|page|site|url)|shall i open|would you like me to open)",
@@ -134,7 +175,11 @@ class Assistant:
                 re.IGNORECASE
             ))
             if not already_asks:
-                reply = f"{reply.rstrip('.')} . Would you like me to open that link for you, sir?"
+                reply = f"{reply.rstrip('. ')}. Shall I open it for you, sir?"
+        else:
+            if re.search(r"\b(?:opening|launching|navigating to|visiting|starting|opened|launched)\b", reply, re.IGNORECASE):
+                self.pending_url = None
+                self.pending_label = None
 
         self.speaker.speak(reply)
 
