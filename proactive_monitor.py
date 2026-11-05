@@ -11,7 +11,7 @@ import time
 class ProactiveMonitor:
     """Background sentinel monitoring battery, system health, and upcoming meetings."""
 
-    def __init__(self, speaker, check_interval: float = 30.0, asst=None):
+    def __init__(self, speaker, check_interval: float = 20.0, asst=None):
         self.asst = asst
         self.speaker = speaker
         self.check_interval = check_interval
@@ -19,9 +19,20 @@ class ProactiveMonitor:
         self._thread: threading.Thread | None = None
 
         # State tracking to avoid repetitive alerts
-        self._low_battery_alerted = False
+        self._battery_alerted_levels: set[int] = set()
         self._high_load_alerted = False
         self._alerted_events: set[str] = set()
+
+    @property
+    def _low_battery_alerted(self) -> bool:
+        return bool(self._battery_alerted_levels)
+
+    @_low_battery_alerted.setter
+    def _low_battery_alerted(self, val: bool):
+        if not val:
+            self._battery_alerted_levels.clear()
+        else:
+            self._battery_alerted_levels.add(25)
 
     def start(self):
         if self._running:
@@ -56,13 +67,39 @@ class ProactiveMonitor:
             percent = round(batt.percent)
             plugged = batt.power_plugged
 
+            # If connected to AC power or battery has charged above threshold, reset alerts
             if plugged or percent > 28:
-                self._low_battery_alerted = False
-            elif percent <= 25 and not self._low_battery_alerted:
-                self._low_battery_alerted = True
+                self._battery_alerted_levels.clear()
+                return
+
+            # Multi-tier proactive alerts while discharging:
+            # 1. Critical tier (<= 10%): "we might shut down any moment now"
+            if percent <= 10 and 10 not in self._battery_alerted_levels:
+                self._battery_alerted_levels.update({10, 15, 20, 25})
+                self.speaker.speak(
+                    f"Urgent notice, sir: battery level is at {percent} percent. "
+                    "We might shut down at any moment now. Connect the charger immediately."
+                )
+            # 2. Very very low tier (<= 15%): "very very low battery"
+            elif percent <= 15 and 15 not in self._battery_alerted_levels:
+                self._battery_alerted_levels.update({15, 20, 25})
+                self.speaker.speak(
+                    f"Warning, sir: battery reserves are down to {percent} percent. "
+                    "Very, very low battery remaining. Please connect to power immediately."
+                )
+            # 3. Very low tier (<= 20%): "very low battery"
+            elif percent <= 20 and 20 not in self._battery_alerted_levels:
+                self._battery_alerted_levels.update({20, 25})
+                self.speaker.speak(
+                    f"Caution, sir: battery level is now at {percent} percent. "
+                    "Very low battery. I suggest plugging in your charger soon."
+                )
+            # 4. Low tier (<= 25%): "low battery"
+            elif percent <= 25 and 25 not in self._battery_alerted_levels:
+                self._battery_alerted_levels.add(25)
                 self.speaker.speak(
                     f"Pardon the interruption, sir: battery reserves have reached {percent} percent. "
-                    "I suggest plugging in the charger now."
+                    "Low battery. I suggest plugging in your charger."
                 )
         except Exception:
             pass

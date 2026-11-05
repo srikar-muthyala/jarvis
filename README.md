@@ -37,7 +37,11 @@ J.A.R.V.I.S. inspects your active display to explain errors, code, or web pages:
 
 ### 3. 🛡️ Ambient System Telemetry & Proactive Alerts
 Runs silently in the background and proactively speaks up when critical events occur:
-- **Battery Warning**: Alerts when unplugged battery drops to 25%.
+- **Multi-Tier Battery Warning Sentinel**: Proactively alerts you as battery reserves deplete:
+  - **25% (Low Battery)**: Polite reminder suggesting connecting the charger.
+  - **20% (Very Low Battery)**: Caution alert indicating low reserves remaining.
+  - **15% (Very Very Low Battery)**: Urgent warning urging power connection.
+  - **10% (Critical Shutdown Imminent)**: High-priority Stark alert (*"We might shut down at any moment now. Connect the charger immediately"*).
 - **Proactive Memory Sentinel & Optimizer**: Alerts when system RAM exceeds 90% (*"Notice, sir: system memory load is elevated at 93 percent. Would you like me to optimize memory and bring the load down?"*). When approved (*"yes"*, *"bring it down"*), silently calls Win32 `EmptyWorkingSet` across processes, immediately reclaiming 1–3 GB RAM without closing your applications.
 - **Event Reminders**: Proactively alerts you 5 to 15 minutes before any scheduled Google Calendar event or Google Task begins.
 

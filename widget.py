@@ -55,7 +55,18 @@ def get_system_telemetry() -> dict[str, str]:
         if bat:
             percent = int(round(bat.percent))
             plugged = bat.power_plugged
-            status = "Charging" if plugged else ("Low!" if percent <= 25 else "Discharging")
+            if plugged:
+                status = "Charging"
+            elif percent <= 10:
+                status = "Critical!"
+            elif percent <= 15:
+                status = "Very Low!"
+            elif percent <= 20:
+                status = "Very Low"
+            elif percent <= 25:
+                status = "Low"
+            else:
+                status = "Discharging"
             bat_str = f"{percent}% {status}"
         else:
             bat_str = "AC Power"
@@ -1719,7 +1730,7 @@ class JarvisIslandWidget:
                 bat_text_color = "#f5f5f5"
             else:
                 self.canvas.itemconfig(self.item_bolt_glow, state="hidden")
-                if "Low" in bat_str:
+                if "Low" in bat_str or "Critical" in bat_str:
                     bolt_color = "#f43f5e"
                     bat_text_color = "#f43f5e"
                 else:
