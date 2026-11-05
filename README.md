@@ -128,6 +128,21 @@ Instant AI operations on your active system clipboard without switching apps:
 
 Open `.env` in any text editor. All integrations are modular — configure only what you need.
 
+### 🔑 Quick API Keys & Portals Directory
+
+Get your keys from the official portals below:
+
+| Service / Capability | Status | Direct Website / Portal | Variable in `.env` |
+| :--- | :---: | :--- | :--- |
+| **Google Gemini API** (Primary Brain & Vision) | **Required** | [Google AI Studio API Keys](https://aistudio.google.com/app/apikey) | `LLM_API_KEY` |
+| **Nex-N 2.5 / OpenRouter** (Failover Brain) | Recommended | [OpenRouter API Keys](https://openrouter.ai/keys) | `NEX_API_KEY` |
+| **Local Offline LLM via Ollama** (100% Free) | Optional | [Download Ollama](https://ollama.com/download) *(Zero key needed)* | `NEX_BASE_URL` |
+| **Microsoft Edge-TTS** (British Neural Voice) | Built-In | Zero setup required *(100% Free, no keys needed)* | `TTS_VOICE` |
+| **Fish Audio** (Paul Bettany Voice Cloning) | Optional | [Fish Audio Developer Portal](https://fish.audio) | `FISH_AUDIO_API_KEY` |
+| **Gmail IMAP Summaries** (Read Inbox) | Optional | [Google Account App Passwords](https://myaccount.google.com/apppasswords) | `EMAIL_APP_PASSWORD` |
+| **Google Calendar iCal Sync** | Optional | [Google Calendar Settings](https://calendar.google.com/calendar/r/settings) | `GOOGLE_CALENDAR_URL` |
+| **Google Tasks OAuth 2.0** | Optional | [Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials) | `credentials.json` |
+
 ```ini
 # ==============================================================================
 # J.A.R.V.I.S. Configuration
