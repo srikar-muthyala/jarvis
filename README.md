@@ -317,9 +317,13 @@ If you prefer custom zero-shot voice-cloned speech:
 | **Interactive Terminal Chat** | Double-click `chat.bat` | `./chat.sh` | Silent or spoken interactive conversation in terminal. |
 | **Push-to-Talk (PTT)** | `python jarvis.py --ptt` | `python3 jarvis.py --ptt` | Speak while holding <kbd>Right Ctrl</kbd>. |
 
-### Dynamic Island Hotkeys
+### Dynamic Island & NotchPixel Hotkeys
 - <kbd>Ctrl</kbd> + <kbd>Space</kbd> or <kbd>Alt</kbd> + <kbd>Space</kbd> or <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>J</kbd>: Toggle open/close and focus input.
+- <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>M</kbd>: **Universal Mic Mute Sentinel** — System-wide toggle to mute/unmute your default microphone across all apps (Discord, Zoom, Teams) with an instant glowing on-island alert pill.
+- <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>N</kbd>: **Island / Notch Mode Toggle** — Instantly switch between Apple **Floating Island** (soft rounded pill) and MacBook-style **Top Notch** (docked flush against the screen bezel).
 - <kbd>Esc</kbd>: Cut off speech playback or collapse the widget.
+- **Now Playing Media Controller**: Automatically detects active playback from Spotify, Chrome, Edge, YouTube, or Apple Music via Windows SMTC, blossoming the island with spinning vinyl art, track title marquee, and animated equalizer bars.
+- **Fluid Volume HUD**: Real-time smooth horizontal volume slider on the island whenever system volume changes.
 - Hover cursor over the collapsed pill to peek at live telemetry and auto-collapse after 5 seconds of leaving.
 
 ---
@@ -355,11 +359,13 @@ jarvis/
 ├── link_google_tasks.bat  # Windows launcher for Google Tasks connection
 ├── link_google_tasks.sh   # Linux launcher for Google Tasks connection
 ├── llm.py                 # Gemini multimodal & tool-calling function declarations
+├── media_controller.py    # Windows SMTC media integration (Now Playing, track metadata, controls)
 ├── proactive_monitor.py   # Background battery, RAM, and calendar sentinel
 ├── research_agent.py      # Multi-source web research & Markdown dossier compiler
 ├── run.bat / run.sh       # Hands-free background voice listener
 ├── setup.bat / setup.sh   # One-click environment bootstrap & dependency installer
 ├── setup_google_tasks.py  # Google Tasks OAuth 2.0 local loopback server
+├── system_sentinel.py     # Universal mic mute sentinel & dynamic volume HUD controller
 ├── test_commands.py       # Comprehensive parser unit test suite (115 tests)
 ├── vision.py              # Win32 GDI / Pillow screen perception & Gemini vision
 ├── widget.bat / widget.sh # Desktop floating Dynamic Island launcher

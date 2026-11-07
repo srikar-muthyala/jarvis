@@ -44,6 +44,8 @@ from jarvis import Assistant, load_env
 from commands import load_apps
 from actions import Context, TimerManager
 from llm import LLM
+import media_controller
+import system_sentinel
 
 
 def get_system_telemetry() -> dict[str, str]:
@@ -330,38 +332,60 @@ def build_twocode_robo_face(size: int = 40, mood: str = "online", scale: int = 3
 
 
 
-def build_twocode_background(w: int, h: int, mood: str = "online", expanded: bool = False, scale: int = 1) -> Image.Image:
-    """Generate the sleek Black & Grey Dynamic Island container and card grid."""
+def build_twocode_background(
+    w: int,
+    h: int,
+    mood: str = "online",
+    expanded: bool = False,
+    scale: int = 1,
+    style: str = "island",
+    theme: str = "liquid_glass"
+) -> Image.Image:
+    """Generate the sleek Liquid Glass / Black & Grey Dynamic Island container and card grid."""
     # Base background matches -transparentcolor #010101 (1, 1, 1) with alpha 0 to eliminate black clipping box
     img = Image.new("RGBA", (w, h), (1, 1, 1, 0))
     draw = ImageDraw.Draw(img)
 
+    # Theme palette
+    if theme == "liquid_glass":
+        fill_bg = (12, 14, 20, 255)
+        border_tint = (46, 52, 66, 255)
+        glass_highlight = (255, 255, 255, 34)
+    else:  # oled_black
+        fill_bg = (8, 8, 10, 255)
+        border_tint = (38, 38, 44, 255)
+        glass_highlight = (255, 255, 255, 20)
+
     # Sleek Monochrome Black & Grey palette with subtle mood cues
-    border_tint = (44, 44, 44, 255)
     if mood == "listening":
-        border_tint = (82, 34, 44, 255)
+        border_tint = (225, 29, 72, 220)
     elif mood in ("thinking", "focus", "working"):
-        border_tint = (74, 56, 32, 255)
+        border_tint = (217, 119, 6, 220)
     elif mood in ("done", "speaking"):
-        border_tint = (36, 68, 50, 255)
-    elif mood in ("approval", "curious"):
-        border_tint = (64, 38, 86, 255)
+        border_tint = (16, 185, 129, 220)
+    elif mood in ("approval", "curious", "celebrating"):
+        border_tint = (168, 85, 247, 220)
+    elif mood == "media":
+        border_tint = (29, 185, 84, 220)
+    elif mood == "mic_muted":
+        border_tint = (239, 68, 68, 240)
 
     pad = 2
-    r = 16
-
-    # 1. Main Obsidian Black Island Container (#0a0a0a)
-    draw.rounded_rectangle([pad, 0, w - pad, h - pad], radius=r, fill=(10, 10, 10, 255), outline=border_tint, width=1)
-
     if expanded and w >= 200:
-        # 2. Dynamic Island Card Grid (Matte Charcoal Grey #171717 & Subtle Grey Border #2c2c2c)
+        r = 18
+        # Main Island Container
+        draw.rounded_rectangle([pad, 0, w - pad, h - pad], radius=r, fill=fill_bg, outline=border_tint, width=1)
+        # Specular glass reflection line at the very top edge
+        draw.line([pad + r, 1, w - pad - r, 1], fill=glass_highlight, width=1)
+
+        # Dynamic Island Card Grid
         top_bar_h = 30
         bot_margin = 12
         left_w = int(w * 0.58)
         left_h = max(20, h - top_bar_h - bot_margin)
 
-        card_bg = (23, 23, 23, 255)       # Matte Charcoal #171717
-        card_border = (44, 44, 44, 255)   # Border Grey #2c2c2c
+        card_bg = (23, 26, 33, 255) if theme == "liquid_glass" else (20, 20, 20, 255)
+        card_border = (45, 50, 65, 255) if theme == "liquid_glass" else (40, 40, 40, 255)
         card_r = 12
 
         # Left Card (AI Assistant & Chat Area)
@@ -374,12 +398,33 @@ def build_twocode_background(w: int, h: int, mood: str = "online", expanded: boo
             gap = 10
             rc_h = max(10, (left_h - gap) // 2)
 
-            # Right Card 1 (Clock & Date)
+            # Right Card 1 (Now Playing / Clock & Date)
             draw.rounded_rectangle([right_x, top_bar_h, right_x + right_w, top_bar_h + rc_h], radius=card_r, fill=card_bg, outline=card_border, width=1)
 
             # Right Card 2 (Battery & System)
             rc2_y = top_bar_h + rc_h + gap
             draw.rounded_rectangle([right_x, rc2_y, right_x + right_w, top_bar_h + left_h], radius=card_r, fill=card_bg, outline=card_border, width=1)
+    else:
+        # Compact mode
+        if style == "notch":
+            # Hanging top notch: flush at top screen edge, curved at bottom
+            r = min(18, h - 2)
+            pts = [pad, 0, w - pad, 0, w - pad, h - r]
+            steps = 8
+            for i in range(steps + 1):
+                th = (math.pi / 2) * (i / steps)
+                pts.extend([w - pad - r + r * math.cos(th), h - r + r * math.sin(th)])
+            for i in range(steps + 1):
+                th = math.pi / 2 + (math.pi / 2) * (i / steps)
+                pts.extend([pad + r + r * math.cos(th), h - r + r * math.sin(th)])
+            pts.extend([pad, 0])
+            draw.polygon(pts, fill=fill_bg, outline=border_tint)
+            draw.line([pad + r, h - pad, w - pad - r, h - pad], fill=glass_highlight, width=1)
+        else:
+            # Floating Island Capsule
+            r = min(w, h) // 2
+            draw.rounded_rectangle([pad, 0, w - pad, h - pad], radius=r, fill=fill_bg, outline=border_tint, width=1)
+            draw.line([pad + r, 1, w - pad - r, 1], fill=glass_highlight, width=1)
 
     return img
 
@@ -482,6 +527,24 @@ class JarvisIslandWidget:
         self._active_speech_id = None
         self._collapse_timer_id = None
         self._ui_queue: queue.Queue = queue.Queue()
+
+        # NotchPixel Visual Configuration & Modes
+        self.island_style = os.environ.get("ISLAND_STYLE", "island").lower()  # "island" or "notch"
+        self.theme = os.environ.get("ISLAND_THEME", "liquid_glass").lower()  # "liquid_glass" or "oled_black"
+
+        # Media & System Sentinels
+        self.hud_volume_active = False
+        self.hud_volume_val = 50
+        self.hud_volume_muted = False
+        self.hud_volume_until = 0.0
+
+        self.hud_mic_active = False
+        self.hud_mic_muted = False
+        self.hud_mic_until = 0.0
+
+        self.media_state = media_controller.MediaState()
+        self.media_sentinel = media_controller.get_media_sentinel(self._on_media_state_changed)
+        self.sys_sentinel = system_sentinel.get_system_sentinel(on_vol=self._on_volume_changed, on_mic=self._on_mic_changed)
 
         self.telemetry = get_system_telemetry()
         self.telemetry_tick = 0
@@ -711,6 +774,42 @@ class JarvisIslandWidget:
         self.item_ram_track = self.canvas.create_polygon(0, 0, 0, 0, fill="#262626", state="hidden")
         self.item_ram_fill = self.canvas.create_polygon(0, 0, 0, 0, fill="#737373", state="hidden")
 
+        # 7. NotchPixel Enhancements:
+        # A. Compact HUD (Volume & Mic Mute)
+        self.item_hud_icon = self.canvas.create_text(0, 0, text="", font=("Segoe UI", 10), fill="#f5f5f5", state="hidden")
+        self.item_hud_text = self.canvas.create_text(0, 0, anchor="w", text="", font=self.font_compact_title, fill="#f5f5f5", state="hidden")
+        self.item_hud_sub = self.canvas.create_text(0, 0, anchor="w", text="", font=self.font_compact_status, fill="#a3a3a3", state="hidden")
+        self.item_hud_track = self.canvas.create_polygon(0, 0, 0, 0, fill="#262626", state="hidden")
+        self.item_hud_fill = self.canvas.create_polygon(0, 0, 0, 0, fill="#38bdf8", state="hidden")
+
+        # B. Compact Media (Now Playing vinyl record, song title, and animated equalizer)
+        self.item_media_disc = self.canvas.create_oval(0, 0, 0, 0, fill="#1db954", outline="#1ed760", width=1, state="hidden")
+        self.item_media_hole = self.canvas.create_oval(0, 0, 0, 0, fill="#0c0e14", outline="", state="hidden")
+        self.item_media_title = self.canvas.create_text(0, 0, anchor="w", text="", font=self.font_compact_title, fill="#f5f5f5", state="hidden")
+        self.item_media_artist = self.canvas.create_text(0, 0, anchor="w", text="", font=self.font_compact_status, fill="#1db954", state="hidden")
+        self.item_media_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#1db954", state="hidden")
+        self.item_media_bar2 = self.canvas.create_polygon(0, 0, 0, 0, fill="#1db954", state="hidden")
+        self.item_media_bar3 = self.canvas.create_polygon(0, 0, 0, 0, fill="#1db954", state="hidden")
+        self.item_media_bar4 = self.canvas.create_polygon(0, 0, 0, 0, fill="#1db954", state="hidden")
+
+        # C. Compact Mic Sentinel persistent indicator dot
+        self.item_mic_indicator = self.canvas.create_oval(0, 0, 0, 0, fill="#ef4444", outline="#7f1d1d", width=1, state="hidden")
+
+        # D. Header Style Toggle button (Island vs Notch)
+        self.item_btn_style_toggle = self.canvas.create_text(0, 0, text="🏝️", font=("Segoe UI", 9), fill="#737373", tags="btn_style", state="hidden")
+        self.canvas.tag_bind("btn_style", "<Button-1>", lambda e: self.toggle_island_style())
+
+        # E. Expanded Media Card Items (In Right Card 1 when media is playing)
+        self.item_mc_badge = self.canvas.create_text(0, 0, anchor="nw", text="NOW PLAYING", font=("Segoe UI", 8, "bold"), fill="#1db954", state="hidden")
+        self.item_mc_title = self.canvas.create_text(0, 0, anchor="nw", text="", font=("Segoe UI", 10, "bold"), fill="#f5f5f5", state="hidden")
+        self.item_mc_artist = self.canvas.create_text(0, 0, anchor="nw", text="", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden")
+        self.item_mc_prev = self.canvas.create_text(0, 0, text="⏮", font=("Segoe UI", 11), fill="#d4d4d4", tags="mc_prev", state="hidden")
+        self.item_mc_play = self.canvas.create_text(0, 0, text="▶", font=("Segoe UI", 12), fill="#f5f5f5", tags="mc_play", state="hidden")
+        self.item_mc_next = self.canvas.create_text(0, 0, text="⏭", font=("Segoe UI", 11), fill="#d4d4d4", tags="mc_next", state="hidden")
+        self.canvas.tag_bind("mc_prev", "<Button-1>", lambda e: self._on_media_prev())
+        self.canvas.tag_bind("mc_play", "<Button-1>", lambda e: self._on_media_toggle())
+        self.canvas.tag_bind("mc_next", "<Button-1>", lambda e: self._on_media_next())
+
     def _set_placeholder(self):
         self.entry_var.set("Ask Jarvis...")
         self.entry.config(fg="#525252")
@@ -735,11 +834,15 @@ class JarvisIslandWidget:
             self._set_placeholder()
 
     def _get_bg_photo(self, w: int, h: int, mood: str, expanded: bool) -> ImageTk.PhotoImage:
-        key = (w, h, mood, expanded)
+        key = (w, h, mood, expanded, getattr(self, "island_style", "island"), getattr(self, "theme", "liquid_glass"))
         photo = self._bg_cache.get(key)
         if photo is None:
-            photo = ImageTk.PhotoImage(build_twocode_background(w, h, mood, expanded))
-            if len(self._bg_cache) > 150:
+            photo = ImageTk.PhotoImage(build_twocode_background(
+                w, h, mood, expanded,
+                style=getattr(self, "island_style", "island"),
+                theme=getattr(self, "theme", "liquid_glass")
+            ))
+            if len(self._bg_cache) > 200:
                 self._bg_cache.clear()
             self._bg_cache[key] = photo
         return photo
@@ -853,21 +956,39 @@ class JarvisIslandWidget:
 
     def _recompute_target_size(self):
         has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None) or getattr(self.asst, "pending_memory_cleanup", False))
+        now = time.perf_counter()
+        is_mic_hud = getattr(self, "hud_mic_active", False) and (now < getattr(self, "hud_mic_until", 0.0))
+        is_vol_hud = getattr(self, "hud_volume_active", False) and (now < getattr(self, "hud_volume_until", 0.0))
+        is_media_active = bool(getattr(self, "media_state", None) and self.media_state.is_playing and not (self.is_speaking or self.is_listening or self.is_thinking))
+
         if not self.expanded:
-            # Dynamic horizontal bloom: 118px resting -> 176px when waveform is active (speaking or listening)
-            is_active_wave = bool(self.is_speaking or (self.is_listening and self.status_label == "Listening"))
-            if is_active_wave:
-                tw = float(self.W_COMPACT_WAVE)
-            else:
-                # Calculate needed width for text content in compact mode
-                badge_txt = self.current_tool_badge or f"● {self.status_label}"
+            if is_mic_hud:
+                tw = 196.0
+            elif is_vol_hud:
+                tw = 216.0
+            elif is_media_active:
+                # Dynamic width bloom for media title
                 try:
-                    title_w = self.font_compact_title.measure("J.A.R.V.I.S.")
-                    badge_w = self.font_compact_status.measure(badge_txt)
-                    needed_w = 38.0 + max(title_w, badge_w) + 18.0
-                    tw = max(float(self.W_COMPACT), min(float(self.W_COMPACT_WAVE), needed_w))
+                    song_lbl = f"{self.media_state.title} • {self.media_state.artist}"
+                    text_w = self.font_compact_title.measure(song_lbl[:26])
+                    tw = max(220.0, min(310.0, 48.0 + text_w + 48.0))
                 except Exception:
-                    tw = float(self.W_COMPACT)
+                    tw = 240.0
+            else:
+                # Dynamic horizontal bloom: 118px resting -> 176px when waveform is active (speaking or listening)
+                is_active_wave = bool(self.is_speaking or (self.is_listening and self.status_label == "Listening"))
+                if is_active_wave:
+                    tw = float(self.W_COMPACT_WAVE)
+                else:
+                    # Calculate needed width for text content in compact mode
+                    badge_txt = self.current_tool_badge or f"● {self.status_label}"
+                    try:
+                        title_w = self.font_compact_title.measure("J.A.R.V.I.S.")
+                        badge_w = self.font_compact_status.measure(badge_txt)
+                        needed_w = 38.0 + max(title_w, badge_w) + 18.0
+                        tw = max(float(self.W_COMPACT), min(float(self.W_COMPACT_WAVE), needed_w))
+                    except Exception:
+                        tw = float(self.W_COMPACT)
             th = float(self.H_COMPACT)
             expanding = (tw > self.cur_w)
         else:
@@ -1166,13 +1287,66 @@ class JarvisIslandWidget:
         self.entry.focus_force()
         self.entry.icursor(tk.END)
 
+    def toggle_island_style(self):
+        """Toggle between Floating Island capsule and Top Hanging Notch mode."""
+        self.island_style = "notch" if self.island_style == "island" else "island"
+        self._bg_cache.clear()
+        self._recompute_target_size()
+        print(f"  [Island] Mode switched to: {self.island_style.upper()}")
+
+    def toggle_mic_mute(self):
+        """Universal Global Microphone Mute sentinel toggle."""
+        if hasattr(self, "sys_sentinel") and self.sys_sentinel:
+            muted = self.sys_sentinel.toggle_mic_mute()
+            self._show_mic_hud(muted)
+
+    def _show_mic_hud(self, muted: bool):
+        self.hud_mic_active = True
+        self.hud_mic_muted = muted
+        self.hud_mic_until = time.perf_counter() + 2.0
+        self._recompute_target_size()
+
+    def _on_mic_changed(self, muted: bool):
+        self._post_ui(lambda: self._show_mic_hud(muted))
+
+    def _on_volume_changed(self, vol: int, muted: bool):
+        self._post_ui(lambda: self._show_volume_hud(vol, muted))
+
+    def _show_volume_hud(self, vol: int, muted: bool):
+        self.hud_volume_active = True
+        self.hud_volume_val = vol
+        self.hud_volume_muted = muted
+        self.hud_volume_until = time.perf_counter() + 1.8
+        self._recompute_target_size()
+
+    def _on_media_state_changed(self, state: media_controller.MediaState):
+        self._post_ui(lambda: self._apply_media_state(state))
+
+    def _apply_media_state(self, state: media_controller.MediaState):
+        self.media_state = state
+        self._recompute_target_size()
+
+    def _on_media_prev(self):
+        if hasattr(self, "media_sentinel") and self.media_sentinel:
+            self.media_sentinel.prev_track()
+
+    def _on_media_toggle(self):
+        if hasattr(self, "media_sentinel") and self.media_sentinel:
+            self.media_sentinel.toggle_play_pause()
+
+    def _on_media_next(self):
+        if hasattr(self, "media_sentinel") and self.media_sentinel:
+            self.media_sentinel.next_track()
+
     def _init_hotkeys(self):
         try:
             import keyboard
             keyboard.add_hotkey("ctrl+space", lambda: self._post_ui(self._handle_hotkey), suppress=True)
             keyboard.add_hotkey("alt+space", lambda: self._post_ui(self._handle_hotkey), suppress=True)
             keyboard.add_hotkey("ctrl+shift+j", lambda: self._post_ui(self._handle_hotkey), suppress=True)
-            print("  [Island] Global hotkeys active: ctrl+space, alt+space, ctrl+shift+j")
+            keyboard.add_hotkey("ctrl+alt+m", lambda: self._post_ui(self.toggle_mic_mute), suppress=True)
+            keyboard.add_hotkey("ctrl+alt+n", lambda: self._post_ui(self.toggle_island_style), suppress=True)
+            print("  [Island] Global hotkeys active: ctrl+space, alt+space, ctrl+shift+j, ctrl+alt+m (Mic Mute), ctrl+alt+n (Island/Notch)")
         except Exception as e:
             pass
 
@@ -1384,6 +1558,25 @@ class JarvisIslandWidget:
         finally:
             self.root.after(16, self._anim_loop)
 
+    def _hide_wave_items(self):
+        for itm in (self.item_wave_bar1, self.item_wave_bar2, self.item_wave_bar3, getattr(self, "item_wave_bar4", None)):
+            if itm is not None:
+                self.canvas.itemconfig(itm, state="hidden")
+
+    def _hide_media_compact_items(self):
+        for itm in (
+            getattr(self, "item_media_disc", None),
+            getattr(self, "item_media_hole", None),
+            getattr(self, "item_media_title", None),
+            getattr(self, "item_media_artist", None),
+            getattr(self, "item_media_bar1", None),
+            getattr(self, "item_media_bar2", None),
+            getattr(self, "item_media_bar3", None),
+            getattr(self, "item_media_bar4", None),
+        ):
+            if itm is not None:
+                self.canvas.itemconfig(itm, state="hidden")
+
     def _render(self):
         w = int(self.cur_w)
         h = int(self.cur_h)
@@ -1392,7 +1585,16 @@ class JarvisIslandWidget:
 
         has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None))
         now = time.perf_counter()
-        if self.mascot.is_celebrating:
+
+        is_mic_hud = getattr(self, "hud_mic_active", False) and (now < getattr(self, "hud_mic_until", 0.0))
+        is_vol_hud = getattr(self, "hud_volume_active", False) and (now < getattr(self, "hud_volume_until", 0.0))
+        is_media_active = bool(getattr(self, "media_state", None) and self.media_state.is_playing and not (self.is_speaking or self.is_listening or self.is_thinking))
+
+        if is_mic_hud and self.hud_mic_muted:
+            mood = "mic_muted"
+        elif is_media_active:
+            mood = "media"
+        elif self.mascot.is_celebrating:
             mood = "celebrating"
         elif has_approval:
             mood = "approval"
@@ -1408,7 +1610,7 @@ class JarvisIslandWidget:
             mood = "online"
 
         island_x = (self.WIN_W - w) // 2
-        island_y = 0
+        island_y = 10 if (getattr(self, "island_style", "island") == "island" and not self.expanded) else 0
 
         # Background frame positioned at (island_x, island_y)
         bg_photo = self._get_bg_photo(w, h, mood, self.expanded)
@@ -1416,7 +1618,7 @@ class JarvisIslandWidget:
         self.canvas.coords(self.item_bg, island_x, island_y)
 
         # ----------------------------------------------------------------------
-        # COMPACT NOTCH MODE (Docked at top bezel)
+        # COMPACT NOTCH / ISLAND MODE
         # ----------------------------------------------------------------------
         if not self.expanded:
             self.input_frame.place_forget()
@@ -1429,9 +1631,124 @@ class JarvisIslandWidget:
                 if b is not None:
                     self.canvas.itemconfig(b, state="hidden")
 
+            # CASE A: Mic Sentinel HUD
+            if is_mic_hud:
+                self.canvas.itemconfig(self.item_compact_robo, state="hidden")
+                self.canvas.itemconfig(self.item_compact_title, state="hidden")
+                self.canvas.itemconfig(self.item_compact_status, state="hidden")
+                self._hide_media_compact_items()
+                self._hide_wave_items()
+
+                self.canvas.coords(self.item_hud_icon, island_x + 22, island_y + h / 2)
+                self.canvas.itemconfig(self.item_hud_icon, text="🎙️", state="normal")
+
+                hud_txt = "MIC MUTED" if self.hud_mic_muted else "MIC ACTIVE"
+                hud_color = "#ef4444" if self.hud_mic_muted else "#10b981"
+                self.canvas.coords(self.item_hud_text, island_x + 40, island_y + 12)
+                self.canvas.itemconfig(self.item_hud_text, text=hud_txt, fill=hud_color, state="normal")
+
+                self.canvas.coords(self.item_hud_sub, island_x + 40, island_y + 26)
+                self.canvas.itemconfig(self.item_hud_sub, text="Ctrl+Alt+M to toggle", fill="#a3a3a3", state="normal")
+
+                self.canvas.itemconfig(self.item_hud_track, state="hidden")
+                self.canvas.itemconfig(self.item_hud_fill, state="hidden")
+                self.canvas.itemconfig(self.item_mic_indicator, state="hidden")
+                return
+
+            # CASE B: Volume HUD
+            elif is_vol_hud:
+                self.canvas.itemconfig(self.item_compact_robo, state="hidden")
+                self.canvas.itemconfig(self.item_compact_title, state="hidden")
+                self.canvas.itemconfig(self.item_compact_status, state="hidden")
+                self._hide_media_compact_items()
+                self._hide_wave_items()
+
+                vol_icon = "🔇" if self.hud_volume_muted else "🔊"
+                self.canvas.coords(self.item_hud_icon, island_x + 22, island_y + h / 2)
+                self.canvas.itemconfig(self.item_hud_icon, text=vol_icon, state="normal")
+
+                self.canvas.coords(self.item_hud_text, island_x + 40, island_y + h / 2)
+                self.canvas.itemconfig(self.item_hud_text, text=f"{self.hud_volume_val}%", fill="#f5f5f5", state="normal")
+
+                # Horizontal Volume Bar
+                bx = island_x + 78.0
+                bw = max(30.0, float(w - 94.0))
+                cy = island_y + h / 2
+                pts_tr = _rounded_rect_points(bx, cy - 3.0, bx + bw, cy + 3.0, r=3.0)
+                self.canvas.coords(self.item_hud_track, pts_tr)
+                self.canvas.itemconfig(self.item_hud_track, fill="#262626", state="normal")
+
+                fill_w = max(4.0, (self.hud_volume_val / 100.0) * bw)
+                pts_fl = _rounded_rect_points(bx, cy - 3.0, bx + fill_w, cy + 3.0, r=3.0)
+                self.canvas.coords(self.item_hud_fill, pts_fl)
+                self.canvas.itemconfig(self.item_hud_fill, fill="#38bdf8", state="normal")
+
+                self.canvas.itemconfig(self.item_hud_sub, state="hidden")
+                self.canvas.itemconfig(self.item_mic_indicator, state="hidden")
+                return
+
+            # Hide HUD items if not active
+            self.canvas.itemconfig(self.item_hud_icon, state="hidden")
+            self.canvas.itemconfig(self.item_hud_text, state="hidden")
+            self.canvas.itemconfig(self.item_hud_sub, state="hidden")
+            self.canvas.itemconfig(self.item_hud_track, state="hidden")
+            self.canvas.itemconfig(self.item_hud_fill, state="hidden")
+
+            # CASE C: Now Playing Media Island
+            if is_media_active:
+                self.canvas.itemconfig(self.item_compact_robo, state="hidden")
+                self.canvas.itemconfig(self.item_compact_title, state="hidden")
+                self.canvas.itemconfig(self.item_compact_status, state="hidden")
+                self._hide_wave_items()
+
+                # Spinning vinyl disc indicator
+                cx_disc = island_x + 22.0
+                cy_disc = island_y + h / 2
+                self.canvas.coords(self.item_media_disc, cx_disc - 10, cy_disc - 10, cx_disc + 10, cy_disc + 10)
+                self.canvas.coords(self.item_media_hole, cx_disc - 3, cy_disc - 3, cx_disc + 3, cy_disc + 3)
+                self.canvas.itemconfig(self.item_media_disc, state="normal")
+                self.canvas.itemconfig(self.item_media_hole, state="normal")
+
+                # Track Title & Artist
+                avail_mw = max(40, int(w) - 76)
+                disp_title = self._truncate_text_to_width(self.media_state.title or "Playing", self.font_compact_title, avail_mw)
+                art_lbl = f"{self.media_state.artist} • {self.media_state.source_app}" if self.media_state.artist else self.media_state.source_app
+                disp_artist = self._truncate_text_to_width(art_lbl, self.font_compact_status, avail_mw)
+
+                self.canvas.coords(self.item_media_title, island_x + 40, island_y + 12)
+                self.canvas.itemconfig(self.item_media_title, text=disp_title, state="normal")
+
+                self.canvas.coords(self.item_media_artist, island_x + 40, island_y + 26)
+                self.canvas.itemconfig(self.item_media_artist, text=disp_artist, state="normal")
+
+                # Music Equalizer Bars (pulsing vibrant Spotify green)
+                eq_x = island_x + w - 24.0
+                eq_bars = (self.item_media_bar1, self.item_media_bar2, self.item_media_bar3, self.item_media_bar4)
+                eq_offs = (-8.0, -2.5, 3.0, 8.5)
+                eq_freqs = (5.2, 7.1, 4.4, 6.6)
+                eq_p_offs = (0.0, 1.4, 2.7, 4.0)
+
+                for bar_item, off, freq, p_off in zip(eq_bars, eq_offs, eq_freqs, eq_p_offs):
+                    bh = max(3.5, min(16.0, 4.0 + 11.0 * abs(math.sin(self._anim_phase * freq + p_off))))
+                    pts = _rounded_rect_points(eq_x + off - 1.2, cy_disc - bh / 2, eq_x + off + 1.2, cy_disc + bh / 2, r=1.2)
+                    self.canvas.coords(bar_item, pts)
+                    self.canvas.itemconfig(bar_item, fill="#1db954", state="normal")
+
+                self.canvas.itemconfig(self.item_mic_indicator, state="hidden")
+                return
+
+            # CASE D: Default Assistant Compact Notch
+            self._hide_media_compact_items()
             robo_img = self.mascot.get_photo_image(size=28, mood=mood, phase=self._anim_phase)
             self.canvas.coords(self.item_compact_robo, island_x + 20, island_y + h / 2)
             self.canvas.itemconfig(self.item_compact_robo, image=robo_img, state="normal")
+
+            # Persistent Mic Mute Dot indicator (red warning dot if system mic is muted)
+            if hasattr(self, "sys_sentinel") and self.sys_sentinel and self.sys_sentinel.get_mic_mute():
+                self.canvas.coords(self.item_mic_indicator, island_x + 28, island_y + 6, island_x + 36, island_y + 14)
+                self.canvas.itemconfig(self.item_mic_indicator, state="normal")
+            else:
+                self.canvas.itemconfig(self.item_mic_indicator, state="hidden")
 
             is_active_listening = (self.is_listening and self.status_label == "Listening")
             is_active_wave = bool(is_active_listening or self.is_speaking)
@@ -1446,8 +1763,7 @@ class JarvisIslandWidget:
             self.canvas.coords(self.item_compact_status, island_x + 38, island_y + 26)
             self.canvas.itemconfig(self.item_compact_status, text=displayed_badge, fill=self.status_color, state="normal")
 
-            is_active_listening = (self.is_listening and self.status_label == "Listening")
-            if is_active_listening or self.is_speaking:
+            if is_active_wave:
                 cy = island_y + h / 2
                 bx = island_x + w - 24.0
                 wave_color = "#f43f5e" if is_active_listening else "#10b981"
@@ -1468,8 +1784,7 @@ class JarvisIslandWidget:
                     self.canvas.coords(bar_item, pts)
                     self.canvas.itemconfig(bar_item, fill=wave_color, state="normal")
             else:
-                for itm in (self.item_wave_bar1, self.item_wave_bar2, self.item_wave_bar3, self.item_wave_bar4):
-                    self.canvas.itemconfig(itm, state="hidden")
+                self._hide_wave_items()
 
             return
 
@@ -1502,6 +1817,8 @@ class JarvisIslandWidget:
         # Top Header Bar
         self.canvas.coords(self.item_header_logo, island_x + 18, island_y + 15)
         self.canvas.itemconfig(self.item_header_logo, state="normal")
+        self.canvas.coords(self.item_btn_style_toggle, island_x + w - 54, island_y + 15)
+        self.canvas.itemconfig(self.item_btn_style_toggle, text="🏝️" if getattr(self, "island_style", "island") == "island" else "💻", state="normal")
         self.canvas.coords(self.item_btn_min, island_x + w - 34, island_y + 15)
         self.canvas.coords(self.item_btn_close, island_x + w - 16, island_y + 15)
         self.canvas.itemconfig(self.item_btn_min, state="normal")
@@ -1649,33 +1966,76 @@ class JarvisIslandWidget:
         right_w = (island_x + w) - right_x - 14
         rc_h = max(10, (left_h - gap) // 2)
 
-        # 2. Right Top Card: Clock & Date & 3. Right Bottom Card: Battery & System
+        # 2. Right Top Card: Now Playing Media Card OR Clock & Date
         if right_w >= 40 and left_h >= 60:
             rc1_y = top_bar_h
-            cy1 = rc1_y + rc_h / 2
-            now = datetime.datetime.now()
-            hh_str = now.strftime("%H")
-            mm_str = now.strftime("%M")
-            date_str = now.strftime("%A, %d %b")
+            has_media = bool(getattr(self, "media_state", None) and self.media_state.is_active)
+            if has_media:
+                # Hide Clock & Date items
+                self.canvas.itemconfig(self.item_clock_time, state="hidden")
+                self.canvas.itemconfig(self.item_clock_colon, state="hidden")
+                self.canvas.itemconfig(self.item_clock_mm, state="hidden")
+                self.canvas.itemconfig(self.item_clock_date, state="hidden")
 
-            # Heartbeat breathing colon animation (sine wave between dim grey and crisp white)
-            colon_val = int(140 + 115 * math.sin(self._anim_phase * 2.8))
-            colon_fill = f"#{colon_val:02x}{colon_val:02x}{colon_val:02x}"
+                # Show Media Card items
+                src_lbl = f"● {self.media_state.source_app.upper()}"
+                self.canvas.coords(self.item_mc_badge, right_x + 16, rc1_y + 10)
+                self.canvas.itemconfig(self.item_mc_badge, text=src_lbl, state="normal")
 
-            hh_w = self.font_clock.measure(hh_str)
-            colon_w = self.font_clock.measure(":")
+                avail_mw = max(40, right_w - 90)
+                disp_title = self._truncate_text_to_width(self.media_state.title or "Unknown Track", self.font_chip_bold, avail_mw)
+                disp_art = self._truncate_text_to_width(self.media_state.artist or "Media Player", self.font_compact_status, avail_mw)
 
-            self.canvas.coords(self.item_clock_time, right_x + 16, cy1 - 12)
-            self.canvas.itemconfig(self.item_clock_time, text=hh_str, fill="#f5f5f5", state="normal")
+                self.canvas.coords(self.item_mc_title, right_x + 16, rc1_y + 26)
+                self.canvas.itemconfig(self.item_mc_title, text=disp_title, state="normal")
 
-            self.canvas.coords(self.item_clock_colon, right_x + 16 + hh_w, cy1 - 12)
-            self.canvas.itemconfig(self.item_clock_colon, text=":", fill=colon_fill, state="normal")
+                self.canvas.coords(self.item_mc_artist, right_x + 16, rc1_y + 44)
+                self.canvas.itemconfig(self.item_mc_artist, text=disp_art, state="normal")
 
-            self.canvas.coords(self.item_clock_mm, right_x + 16 + hh_w + colon_w, cy1 - 12)
-            self.canvas.itemconfig(self.item_clock_mm, text=mm_str, fill="#f5f5f5", state="normal")
+                # Media Playback Controls
+                ctrl_y = rc1_y + 36
+                self.canvas.coords(self.item_mc_prev, right_x + right_w - 60, ctrl_y)
+                self.canvas.itemconfig(self.item_mc_prev, state="normal")
 
-            self.canvas.coords(self.item_clock_date, right_x + 16, cy1 + 12)
-            self.canvas.itemconfig(self.item_clock_date, text=date_str, fill="#a3a3a3", state="normal")
+                play_icon = "⏸" if self.media_state.is_playing else "▶"
+                self.canvas.coords(self.item_mc_play, right_x + right_w - 38, ctrl_y)
+                self.canvas.itemconfig(self.item_mc_play, text=play_icon, state="normal")
+
+                self.canvas.coords(self.item_mc_next, right_x + right_w - 16, ctrl_y)
+                self.canvas.itemconfig(self.item_mc_next, state="normal")
+            else:
+                # Hide Media Card items
+                self.canvas.itemconfig(self.item_mc_badge, state="hidden")
+                self.canvas.itemconfig(self.item_mc_title, state="hidden")
+                self.canvas.itemconfig(self.item_mc_artist, state="hidden")
+                self.canvas.itemconfig(self.item_mc_prev, state="hidden")
+                self.canvas.itemconfig(self.item_mc_play, state="hidden")
+                self.canvas.itemconfig(self.item_mc_next, state="hidden")
+
+                # Show Classic Clock & Date
+                cy1 = rc1_y + rc_h / 2
+                now = datetime.datetime.now()
+                hh_str = now.strftime("%H")
+                mm_str = now.strftime("%M")
+                date_str = now.strftime("%A, %d %b")
+
+                colon_val = int(140 + 115 * math.sin(self._anim_phase * 2.8))
+                colon_fill = f"#{colon_val:02x}{colon_val:02x}{colon_val:02x}"
+
+                hh_w = self.font_clock.measure(hh_str)
+                colon_w = self.font_clock.measure(":")
+
+                self.canvas.coords(self.item_clock_time, right_x + 16, cy1 - 12)
+                self.canvas.itemconfig(self.item_clock_time, text=hh_str, fill="#f5f5f5", state="normal")
+
+                self.canvas.coords(self.item_clock_colon, right_x + 16 + hh_w, cy1 - 12)
+                self.canvas.itemconfig(self.item_clock_colon, text=":", fill=colon_fill, state="normal")
+
+                self.canvas.coords(self.item_clock_mm, right_x + 16 + hh_w + colon_w, cy1 - 12)
+                self.canvas.itemconfig(self.item_clock_mm, text=mm_str, fill="#f5f5f5", state="normal")
+
+                self.canvas.coords(self.item_clock_date, right_x + 16, cy1 + 12)
+                self.canvas.itemconfig(self.item_clock_date, text=date_str, fill="#a3a3a3", state="normal")
 
             # 3. Right Bottom Card: Battery & System Telemetry with Live Animated Micro-Gauges
             rc2_y = top_bar_h + rc_h + gap
@@ -1835,6 +2195,17 @@ class JarvisIslandWidget:
                 self.canvas.itemconfig(b, state="hidden")
         self.chip_approve_bbox = None
         self.chip_deny_bbox = None
+        for item in (
+            getattr(self, "item_btn_style_toggle", None),
+            getattr(self, "item_mc_badge", None),
+            getattr(self, "item_mc_title", None),
+            getattr(self, "item_mc_artist", None),
+            getattr(self, "item_mc_prev", None),
+            getattr(self, "item_mc_play", None),
+            getattr(self, "item_mc_next", None),
+        ):
+            if item is not None:
+                self.canvas.itemconfig(item, state="hidden")
 
     def on_send(self):
         self._cancel_collapse_timer()
@@ -1987,6 +2358,11 @@ class JarvisIslandWidget:
             self.toggle_expand(True)
             return
 
+        # Check Style Toggle Button (Island vs Notch)
+        if (island_x + w - 66 <= x <= island_x + w - 46) and (4 <= y <= 26):
+            self.toggle_island_style()
+            return
+
         # Check Minimize Button (—)
         if (island_x + w - 44 <= x <= island_x + w - 24) and (4 <= y <= 26):
             self.toggle_expand(False)
@@ -1996,6 +2372,25 @@ class JarvisIslandWidget:
         if (island_x + w - 24 <= x <= island_x + w - 4) and (4 <= y <= 26):
             self.toggle_expand(False)
             return
+
+        # Check Media Card Playback Controls in Right Card 1
+        has_media = bool(getattr(self, "media_state", None) and self.media_state.is_active)
+        if has_media:
+            left_w = int(w * 0.58)
+            left_x = island_x + 14
+            gap = 10
+            right_x = left_x + left_w + gap
+            right_w = (island_x + w) - right_x - 14
+            ctrl_y = 30 + 36
+            if (abs(x - (right_x + right_w - 60)) <= 12) and (abs(y - ctrl_y) <= 12):
+                self._on_media_prev()
+                return
+            if (abs(x - (right_x + right_w - 38)) <= 12) and (abs(y - ctrl_y) <= 12):
+                self._on_media_toggle()
+                return
+            if (abs(x - (right_x + right_w - 16)) <= 12) and (abs(y - ctrl_y) <= 12):
+                self._on_media_next()
+                return
 
         # Check Mic button
         left_w = int(w * 0.58)
