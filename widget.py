@@ -339,107 +339,132 @@ def build_twocode_background(
     expanded: bool = False,
     scale: int = 1,
     style: str = "island",
-    theme: str = "liquid_glass"
+    theme: str = "mac_glass"
 ) -> Image.Image:
-    """Generate the authentic Liquid Glass Dynamic Island container and card grid."""
-    img = Image.new("RGBA", (w, h), (1, 1, 1, 0))
-    draw = ImageDraw.Draw(img)
+    """Generate authentic macOS-style Frosted Glass container and card grid with sub-pixel antialiasing."""
+    # 4x internal supersampling for pristine antialiasing and sub-pixel edge clarity
+    ss = 4
+    sw, sh = max(8, w * ss), max(8, h * ss)
 
-    pad = 2
+    pad = 2 * ss
     x1, y1 = pad, pad
-    x2, y2 = w - pad, h - pad
-    radius = min(w // 2, h // 2, 20) if not expanded else 22
+    x2, y2 = sw - pad, sh - pad
 
-    # 1. Base Glass Material with Vertical Light Refraction
-    glass_surface = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    # Pure capsule pill in compact mode (radius = height / 2)
+    radius = min(sw // 2, sh // 2) if not expanded else 22 * ss
+
+    # Master canvas initialized with transparent colorkey (RGB 1, 1, 1)
+    img = Image.new("RGBA", (sw, sh), (1, 1, 1, 255))
+
+    # 1. Base Glass Material
+    glass_surface = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
     sdraw = ImageDraw.Draw(glass_surface)
 
-    # Multi-stop vertical refraction gradient
-    for y in range(h):
-        t = y / max(1, h - 1)
-        if t < 0.25:
-            k = t / 0.25
-            r = int(30 + (20 - 30) * k)
-            g = int(36 + (24 - 36) * k)
-            b = int(50 + (34 - 50) * k)
-            a = int(230 + (210 - 230) * k)
-        elif t < 0.8:
-            k = (t - 0.25) / 0.55
-            r = int(20 + (14 - 20) * k)
-            g = int(24 + (16 - 24) * k)
-            b = int(34 + (24 - 34) * k)
-            a = 210
-        else:
-            k = (t - 0.8) / 0.2
-            r = int(14 + (22 - 14) * k)
-            g = int(16 + (26 - 16) * k)
-            b = int(24 + (36 - 24) * k)
-            a = int(210 + (225 - 210) * k)
-        sdraw.line([(0, y), (w, y)], fill=(r, g, b, a))
+    if not expanded:
+        # COMPACT MODE: Apple Dynamic Island Obsidian Glass Capsule
+        # Deep lustrous obsidian black with soft top light refraction (ZERO diagonal slashes)
+        for y in range(sh):
+            t = y / max(1, sh - 1)
+            v = int(14 * (1.0 - t))
+            r = 11 + v
+            g = 13 + v
+            b = 19 + v
+            sdraw.line([(0, y), (sw, y)], fill=(r, g, b, 255))
+    else:
+        # EXPANDED MODE: macOS Sonoma / Sequoia Smoked Frosted Glass
+        # Continuous dark obsidian refraction gradient (clean, smooth, no artificial streaks)
+        for y in range(sh):
+            t = y / max(1, sh - 1)
+            if t < 0.25:
+                k = t / 0.25
+                r = int(24 + (18 - 24) * k)
+                g = int(28 + (22 - 28) * k)
+                b = int(42 + (34 - 42) * k)
+            elif t < 0.8:
+                k = (t - 0.25) / 0.55
+                r = int(18 + (13 - 18) * k)
+                g = int(22 + (16 - 22) * k)
+                b = int(34 + (24 - 34) * k)
+            else:
+                k = (t - 0.8) / 0.2
+                r = int(13 + (17 - 13) * k)
+                g = int(16 + (20 - 16) * k)
+                b = int(24 + (30 - 24) * k)
+            sdraw.line([(0, y), (sw, y)], fill=(r, g, b, 255))
 
-    # Diagonal Caustic Sheen Beam across the glass (Apple Liquid Glass signature)
-    beam_w = int(w * 0.45)
-    for bx in range(beam_w):
-        bt = math.sin((bx / max(1, beam_w)) * math.pi)
-        alpha_beam = int(24 * bt)
-        sdraw.line([(bx, 0), (bx + int(h * 0.8), h)], fill=(255, 255, 255, alpha_beam), width=1)
-
-    # Rounded pill / card mask
-    mask = Image.new("L", (w, h), 0)
+    # Clean antialiased mask
+    mask = Image.new("L", (sw, sh), 0)
     mdraw = ImageDraw.Draw(mask)
     mdraw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=255)
+
+    # Composite glass surface onto master canvas through mask
     img.paste(glass_surface, (0, 0), mask)
+    draw = ImageDraw.Draw(img)
 
-    # 2. Specular Bevel & Inner Rim Highlights
-    rim_color = (255, 255, 255, 42)
-    draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, outline=rim_color, width=1)
+    # 2. Specular Bevel & Mac Glass Perimeter Edge
+    rim_alpha = 32 if not expanded else 28
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, outline=(255, 255, 255, rim_alpha), width=max(1, ss))
 
-    gleam_inset = radius + 2
+    # Top Edge Specular Gleam (soft horizontal light reflection on upper bezel)
+    gleam_inset = radius + 4 * ss
     if x2 - gleam_inset > x1 + gleam_inset:
-        # Crisp specular light catch on top edge
-        draw.line([(x1 + gleam_inset, y1 + 1), (x2 - gleam_inset, y1 + 1)], fill=(255, 255, 255, 110), width=1)
-        draw.line([(x1 + gleam_inset + 4, y1 + 2), (x2 - gleam_inset - 4, y1 + 2)], fill=(255, 255, 255, 40), width=1)
-        draw.line([(x1 + gleam_inset, y2 - 1), (x2 - gleam_inset, y2 - 1)], fill=(255, 255, 255, 25), width=1)
+        gleam_alpha = 95 if not expanded else 75
+        draw.line([(x1 + gleam_inset, y1 + ss), (x2 - gleam_inset, y1 + ss)],
+                  fill=(255, 255, 255, gleam_alpha), width=max(1, ss))
+        draw.line([(x1 + gleam_inset + 4 * ss, y1 + 2 * ss), (x2 - gleam_inset - 4 * ss, y1 + 2 * ss)],
+                  fill=(255, 255, 255, gleam_alpha // 2), width=max(1, ss))
 
-    # 3. If Expanded: Draw Frosted Glass Cards with Inset Highlights
-    if expanded and w >= 220:
-        top_bar_h = 32
-        bot_margin = 14
-        left_w = int(w * 0.58)
-        left_h = max(20, h - top_bar_h - bot_margin)
-        card_r = 14
+    # 3. EXPANDED MODE: Frosted Glass Inset Card Panels
+    if expanded and sw >= 220 * ss:
+        top_bar_h = 32 * ss
+        bot_margin = 14 * ss
+        left_w = int(sw * 0.58)
+        left_h = max(20 * ss, sh - top_bar_h - bot_margin)
+        card_r = 16 * ss
 
-        card_bg = (24, 28, 42, 195)
-        card_rim = (255, 255, 255, 26)
-        card_gleam = (255, 255, 255, 55)
+        card_bg = (24, 30, 46, 255)
+        card_rim = (255, 255, 255, 24)
+        card_gleam = (255, 255, 255, 50)
 
         # Left Card (AI Assistant)
-        lx1, ly1 = 14, top_bar_h
-        lx2, ly2 = 14 + left_w, top_bar_h + left_h
-        draw.rounded_rectangle([lx1, ly1, lx2, ly2], radius=card_r, fill=card_bg, outline=card_rim, width=1)
-        draw.line([(lx1 + card_r, ly1 + 1), (lx2 - card_r, ly1 + 1)], fill=card_gleam, width=1)
+        lx1, ly1 = 14 * ss, top_bar_h
+        lx2, ly2 = 14 * ss + left_w, top_bar_h + left_h
+        draw.rounded_rectangle([lx1, ly1, lx2, ly2], radius=card_r, fill=card_bg, outline=card_rim, width=ss)
+        draw.line([(lx1 + card_r, ly1 + ss), (lx2 - card_r, ly1 + ss)], fill=card_gleam, width=ss)
 
         # Right Cards Column
-        right_x = 14 + left_w + 12
-        right_w = w - right_x - 14
-        if right_w > 10 and left_h > 20:
-            gap = 10
-            rc_h = max(10, (left_h - gap) // 2)
+        right_x = 14 * ss + left_w + 12 * ss
+        right_w = sw - right_x - 14 * ss
+        if right_w > 10 * ss and left_h > 20 * ss:
+            gap = 10 * ss
+            rc_h = max(10 * ss, (left_h - gap) // 2)
 
             # Right Card 1 (Now Playing / Clock & Date)
-            rx1, ry1 = right_x, top_bar_h
+            rx1, ly1 = right_x, top_bar_h
             rx2, ry2 = right_x + right_w, top_bar_h + rc_h
-            draw.rounded_rectangle([rx1, ry1, rx2, ry2], radius=card_r, fill=card_bg, outline=card_rim, width=1)
-            draw.line([(rx1 + card_r, ry1 + 1), (rx2 - card_r, ry1 + 1)], fill=card_gleam, width=1)
+            draw.rounded_rectangle([rx1, ly1, rx2, ry2], radius=card_r, fill=card_bg, outline=card_rim, width=ss)
+            draw.line([(rx1 + card_r, ly1 + ss), (rx2 - card_r, ly1 + ss)], fill=card_gleam, width=ss)
 
             # Right Card 2 (Battery & System Telemetry)
             rc2_y = top_bar_h + rc_h + gap
             rx2_1, ry2_1 = right_x, rc2_y
             rx2_2, ry2_2 = right_x + right_w, top_bar_h + left_h
-            draw.rounded_rectangle([rx2_1, ry2_1, rx2_2, ry2_2], radius=card_r, fill=card_bg, outline=card_rim, width=1)
-            draw.line([(rx2_1 + card_r, ry2_1 + 1), (rx2_2 - card_r, ry2_1 + 1)], fill=card_gleam, width=1)
+            draw.rounded_rectangle([rx2_1, ry2_1, rx2_2, ry2_2], radius=card_r, fill=card_bg, outline=card_rim, width=ss)
+            draw.line([(rx2_1 + card_r, ry2_1 + ss), (rx2_2 - card_r, ry2_1 + ss)], fill=card_gleam, width=ss)
 
-    return img
+    # Downsample with high-fidelity Lanczos filter
+    final_img = img.resize((w, h), Image.Resampling.LANCZOS)
+
+    # Clean colorkey boundary: snap near-colorkey fringe pixels to exact (1, 1, 1)
+    # This prevents Windows DWM from rendering ugly black staircase fringes around curved edges
+    pixels = final_img.load()
+    for py in range(h):
+        for px in range(w):
+            pr, pg, pb, _ = pixels[px, py]
+            if pr < 10 and pg < 10 and pb < 10:
+                pixels[px, py] = (1, 1, 1, 255)
+
+    return final_img
 
 
 def make_cubic_bezier(p1x: float, p1y: float, p2x: float, p2y: float):
@@ -617,17 +642,33 @@ class JarvisIslandWidget:
         except Exception:
             pass
 
-        # Windows 11 DWM Rounded Window Corners
+        self.root.geometry(f"{self.WIN_W}x{self.WIN_H}+{self.win_x}+{self.win_y}")
+        self.root.update_idletasks()
+
+        # Windows 11 DWM Hardware-Accelerated Acrylic Backdrop Blur & Rounded Corners
         try:
             import ctypes
-            dwm = ctypes.windll.dwmapi
-            corner_pref = ctypes.c_int(2)  # DWMWCP_ROUND
-            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
-            dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), ctypes.sizeof(corner_pref))
+            import BlurWindow.blurWindow as bw
+            user32 = ctypes.windll.user32
+            dwmapi = ctypes.windll.dwmapi
+            hwnd = user32.GetAncestor(self.root.winfo_id(), 2) or self.root.winfo_id()
+
+            # 1. Dark Mode
+            dark = ctypes.c_int(1)
+            dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark))
+
+            # 2. Windows 11 DWM Rounded Window Corners (2 = DWMWCP_ROUND)
+            corner_pref = ctypes.c_int(2)
+            dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), ctypes.sizeof(corner_pref))
+
+            # 3. System Backdrop Acrylic Blur (Win 11 Build 22621+)
+            backdrop_type = ctypes.c_int(3)
+            dwmapi.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(backdrop_type), ctypes.sizeof(backdrop_type))
+
+            # 4. BlurBehind / AccentPolicy Acrylic Blur
+            bw.blur(hwnd, hexColor="#0d111bee", Acrylic=True, Dark=True)
         except Exception:
             pass
-
-        self.root.geometry(f"{self.WIN_W}x{self.WIN_H}+{self.win_x}+{self.win_y}")
 
         self.canvas = tk.Canvas(
             self.root,
@@ -645,15 +686,15 @@ class JarvisIslandWidget:
         self.robo_faces_compact: dict[str, ImageTk.PhotoImage] = {}
         self.robo_faces_expanded: dict[str, ImageTk.PhotoImage] = {}
 
-        # Unified Chat Entry Frame (Frosted Glass Slate)
-        self.input_frame = tk.Frame(self.canvas, bg="#181c2a")
+        # Unified Chat Entry Frame (Mac Frosted Glass Inset)
+        self.input_frame = tk.Frame(self.canvas, bg="#181e2e")
         self.entry_var = tk.StringVar()
         self.entry = tk.Entry(
             self.input_frame,
             textvariable=self.entry_var,
-            bg="#181c2a",
+            bg="#181e2e",
             fg="#f8fafc",
-            insertbackground="#e2e8f0",
+            insertbackground="#38bdf8",
             font=("Segoe UI", 9),
             bd=0,
             highlightthickness=0
@@ -665,11 +706,11 @@ class JarvisIslandWidget:
         self._placeholder_active = True
         self._set_placeholder()
 
-        # Scrollable Reply Area (Frosted Glass Slate)
-        self.reply_frame = tk.Frame(self.canvas, bg="#181c2a")
+        # Scrollable Reply Area (Mac Frosted Glass Inset)
+        self.reply_frame = tk.Frame(self.canvas, bg="#181e2e")
         self.reply_text = tk.Text(
             self.reply_frame,
-            bg="#181c2a",
+            bg="#181e2e",
             fg="#e2e8f0",
             font=("Segoe UI", 9),
             wrap="word",
@@ -756,47 +797,47 @@ class JarvisIslandWidget:
         self.exp_wave_bar5 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
 
         # 3. Top Header Bar (Expanded Mode)
-        self.item_header_logo = self.canvas.create_text(18, 15, anchor="w", text="J.A.R.V.I.S.", font=("Segoe UI", 8, "bold"), fill="#737373", state="hidden")
-        self.item_btn_min = self.canvas.create_text(0, 0, text="—", font=("Segoe UI", 9, "bold"), fill="#737373", tags="btn_min", state="hidden")
-        self.item_btn_close = self.canvas.create_text(0, 0, text="✕", font=("Segoe UI", 8, "bold"), fill="#737373", tags="btn_close", state="hidden")
+        self.item_header_logo = self.canvas.create_text(18, 15, anchor="w", text="J.A.R.V.I.S.", font=("Segoe UI", 8, "bold"), fill="#94a3b8", state="hidden")
+        self.item_btn_min = self.canvas.create_text(0, 0, text="—", font=("Segoe UI", 9, "bold"), fill="#94a3b8", tags="btn_min", state="hidden")
+        self.item_btn_close = self.canvas.create_text(0, 0, text="✕", font=("Segoe UI", 8, "bold"), fill="#94a3b8", tags="btn_close", state="hidden")
 
         # 4. Left AI Assistant Card
         self.item_agent_robo = self.canvas.create_image(0, 0, tags="btn_robo", state="hidden")
         self.canvas.tag_bind("btn_robo", "<Button-1>", lambda e: self.mascot.trigger_click_wobble())
-        self.item_agent_title = self.canvas.create_text(0, 0, anchor="w", text="Jarvis Assistant", font=("Segoe UI", 10, "bold"), fill="#f5f5f5", state="hidden")
-        self.item_agent_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden")
+        self.item_agent_title = self.canvas.create_text(0, 0, anchor="w", text="Jarvis Assistant", font=("Segoe UI", 10, "bold"), fill="#f8fafc", state="hidden")
+        self.item_agent_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=("Segoe UI", 8), fill="#94a3b8", state="hidden")
 
         # Input Box Outline & Icons
-        self.item_input_box = self.canvas.create_polygon(0, 0, 0, 0, fill="#181c2a", outline="#384256", width=1.0, smooth=True, state="hidden")
-        self.item_btn_send = self.canvas.create_text(0, 0, text="➤", font=("Segoe UI", 9), fill="#94a3b8", tags="btn_send", state="hidden")
+        self.item_input_box = self.canvas.create_polygon(0, 0, 0, 0, fill="#121624", outline="#2e384d", width=1.0, smooth=True, state="hidden")
+        self.item_btn_send = self.canvas.create_text(0, 0, text="➤", font=("Segoe UI", 9), fill="#38bdf8", tags="btn_send", state="hidden")
         self.item_btn_mic = self.canvas.create_text(0, 0, text="🎙", font=("Segoe UI", 10), fill="#f8fafc", tags="btn_mic", state="hidden")
 
         # Reply & Output Text
-        self.item_reply_text = self.canvas.create_text(0, 0, anchor="nw", text="", font=("Segoe UI", 9), fill="#d4d4d4", state="hidden")
+        self.item_reply_text = self.canvas.create_text(0, 0, anchor="nw", text="", font=("Segoe UI", 9), fill="#e2e8f0", state="hidden")
 
         # Interactive Action / Approval Chips (Yes / No)
-        self.item_chip_approve_bg = self.canvas.create_polygon(0, 0, 0, 0, fill="#262626", outline="#525252", width=1.0, smooth=True, state="hidden", tags="chip_approve")
-        self.item_chip_approve_text = self.canvas.create_text(0, 0, text="✓ Yes", font=("Segoe UI", 8, "bold"), fill="#f5f5f5", state="hidden", tags="chip_approve")
-        self.item_chip_deny_bg = self.canvas.create_polygon(0, 0, 0, 0, fill="#171717", outline="#333333", width=1.0, smooth=True, state="hidden", tags="chip_deny")
-        self.item_chip_deny_text = self.canvas.create_text(0, 0, text="✕ No", font=("Segoe UI", 8), fill="#8a8a8a", state="hidden", tags="chip_deny")
+        self.item_chip_approve_bg = self.canvas.create_polygon(0, 0, 0, 0, fill="#065f46", outline="#34d399", width=1.0, smooth=True, state="hidden", tags="chip_approve")
+        self.item_chip_approve_text = self.canvas.create_text(0, 0, text="✓ Yes", font=("Segoe UI", 8, "bold"), fill="#f8fafc", state="hidden", tags="chip_approve")
+        self.item_chip_deny_bg = self.canvas.create_polygon(0, 0, 0, 0, fill="#1e2433", outline="#475569", width=1.0, smooth=True, state="hidden", tags="chip_deny")
+        self.item_chip_deny_text = self.canvas.create_text(0, 0, text="✕ No", font=("Segoe UI", 8), fill="#94a3b8", state="hidden", tags="chip_deny")
 
         # 5. Right Top Card: Clock & Date
-        self.item_clock_time = self.canvas.create_text(0, 0, anchor="nw", text="12", font=("Segoe UI", 15, "bold"), fill="#f5f5f5", state="hidden")
-        self.item_clock_colon = self.canvas.create_text(0, 0, anchor="nw", text=":", font=("Segoe UI", 15, "bold"), fill="#f5f5f5", state="hidden")
-        self.item_clock_mm = self.canvas.create_text(0, 0, anchor="nw", text="00", font=("Segoe UI", 15, "bold"), fill="#f5f5f5", state="hidden")
-        self.item_clock_date = self.canvas.create_text(0, 0, anchor="nw", text="Mon 02 Nov", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden")
+        self.item_clock_time = self.canvas.create_text(0, 0, anchor="nw", text="12", font=("Segoe UI", 15, "bold"), fill="#ffffff", state="hidden")
+        self.item_clock_colon = self.canvas.create_text(0, 0, anchor="nw", text=":", font=("Segoe UI", 15, "bold"), fill="#ffffff", state="hidden")
+        self.item_clock_mm = self.canvas.create_text(0, 0, anchor="nw", text="00", font=("Segoe UI", 15, "bold"), fill="#ffffff", state="hidden")
+        self.item_clock_date = self.canvas.create_text(0, 0, anchor="nw", text="Mon 02 Nov", font=("Segoe UI", 8), fill="#94a3b8", state="hidden")
 
         # 6. Right Bottom Card: Battery & System Telemetry with Live Animated Micro-Gauges
         self.item_bolt_glow = self.canvas.create_polygon(0, 0, 0, 0, fill="#14532d", state="hidden")
-        self.item_bolt = self.canvas.create_polygon(0, 0, 0, 0, fill="#6bb13f", state="hidden")
-        self.item_sys_bat = self.canvas.create_text(0, 0, anchor="nw", text="Battery", font=("Segoe UI", 9, "bold"), fill="#e5e5e5", state="hidden")
-        self.item_cpu_lbl = self.canvas.create_text(0, 0, anchor="nw", text="CPU 12%", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden")
-        self.item_cpu_track = self.canvas.create_polygon(0, 0, 0, 0, fill="#262626", state="hidden")
-        self.item_cpu_fill = self.canvas.create_polygon(0, 0, 0, 0, fill="#525252", state="hidden")
+        self.item_bolt = self.canvas.create_polygon(0, 0, 0, 0, fill="#4ade80", state="hidden")
+        self.item_sys_bat = self.canvas.create_text(0, 0, anchor="nw", text="Battery", font=("Segoe UI", 9, "bold"), fill="#f8fafc", state="hidden")
+        self.item_cpu_lbl = self.canvas.create_text(0, 0, anchor="nw", text="CPU 12%", font=("Segoe UI", 8), fill="#94a3b8", state="hidden")
+        self.item_cpu_track = self.canvas.create_polygon(0, 0, 0, 0, fill="#1e2433", state="hidden")
+        self.item_cpu_fill = self.canvas.create_polygon(0, 0, 0, 0, fill="#38bdf8", state="hidden")
 
-        self.item_ram_lbl = self.canvas.create_text(0, 0, anchor="nw", text="RAM 48%", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden")
-        self.item_ram_track = self.canvas.create_polygon(0, 0, 0, 0, fill="#262626", state="hidden")
-        self.item_ram_fill = self.canvas.create_polygon(0, 0, 0, 0, fill="#737373", state="hidden")
+        self.item_ram_lbl = self.canvas.create_text(0, 0, anchor="nw", text="RAM 48%", font=("Segoe UI", 8), fill="#94a3b8", state="hidden")
+        self.item_ram_track = self.canvas.create_polygon(0, 0, 0, 0, fill="#1e2433", state="hidden")
+        self.item_ram_fill = self.canvas.create_polygon(0, 0, 0, 0, fill="#f59e0b", state="hidden")
 
         # 7. NotchPixel Enhancements:
         # A. Compact HUD (Volume & Mic Mute)
@@ -2131,14 +2172,14 @@ class JarvisIslandWidget:
             # CPU
             cpu_val = max(0.0, min(100.0, self._cur_cpu_pct))
             cpu_fill_w = max(3.0, (cpu_val / 100.0) * bar_track_w)
-            cpu_color = "#f43f5e" if cpu_val > 85.0 else ("#f59e0b" if cpu_val > 70.0 else "#737373")
+            cpu_color = "#f43f5e" if cpu_val > 85.0 else ("#f59e0b" if cpu_val > 70.0 else "#38bdf8")
 
             self.canvas.coords(self.item_cpu_lbl, right_x + 16, y_cpu - 6)
-            self.canvas.itemconfig(self.item_cpu_lbl, text=f"CPU {cpu_val:.0f}%", fill="#a3a3a3", state="normal")
+            self.canvas.itemconfig(self.item_cpu_lbl, text=f"CPU {cpu_val:.0f}%", fill="#94a3b8", state="normal")
 
             pts_cpu_tr = _rounded_rect_points(bar_x, y_cpu - 2, bar_x + bar_track_w, y_cpu + 2, r=2)
             self.canvas.coords(self.item_cpu_track, pts_cpu_tr)
-            self.canvas.itemconfig(self.item_cpu_track, fill="#262626", state="normal")
+            self.canvas.itemconfig(self.item_cpu_track, fill="#1e2433", state="normal")
 
             pts_cpu_fl = _rounded_rect_points(bar_x, y_cpu - 2, bar_x + cpu_fill_w, y_cpu + 2, r=2)
             self.canvas.coords(self.item_cpu_fill, pts_cpu_fl)
@@ -2147,14 +2188,14 @@ class JarvisIslandWidget:
             # RAM
             ram_val = max(0.0, min(100.0, self._cur_ram_pct))
             ram_fill_w = max(3.0, (ram_val / 100.0) * bar_track_w)
-            ram_color = "#f43f5e" if ram_val > 85.0 else ("#f59e0b" if ram_val > 75.0 else "#737373")
+            ram_color = "#f43f5e" if ram_val > 85.0 else ("#f59e0b" if ram_val > 75.0 else "#f59e0b")
 
             self.canvas.coords(self.item_ram_lbl, right_x + 16, y_ram - 6)
-            self.canvas.itemconfig(self.item_ram_lbl, text=f"RAM {ram_val:.0f}%", fill="#a3a3a3", state="normal")
+            self.canvas.itemconfig(self.item_ram_lbl, text=f"RAM {ram_val:.0f}%", fill="#94a3b8", state="normal")
 
             pts_ram_tr = _rounded_rect_points(bar_x, y_ram - 2, bar_x + bar_track_w, y_ram + 2, r=2)
             self.canvas.coords(self.item_ram_track, pts_ram_tr)
-            self.canvas.itemconfig(self.item_ram_track, fill="#262626", state="normal")
+            self.canvas.itemconfig(self.item_ram_track, fill="#1e2433", state="normal")
 
             pts_ram_fl = _rounded_rect_points(bar_x, y_ram - 2, bar_x + ram_fill_w, y_ram + 2, r=2)
             self.canvas.coords(self.item_ram_fill, pts_ram_fl)
