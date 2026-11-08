@@ -341,90 +341,103 @@ def build_twocode_background(
     style: str = "island",
     theme: str = "liquid_glass"
 ) -> Image.Image:
-    """Generate the sleek Liquid Glass / Black & Grey Dynamic Island container and card grid."""
-    # Base background matches -transparentcolor #010101 (1, 1, 1) with alpha 0 to eliminate black clipping box
+    """Generate the authentic Liquid Glass Dynamic Island container and card grid."""
     img = Image.new("RGBA", (w, h), (1, 1, 1, 0))
     draw = ImageDraw.Draw(img)
 
-    # Theme palette
-    if theme == "liquid_glass":
-        fill_bg = (12, 14, 20, 255)
-        border_tint = (46, 52, 66, 255)
-        glass_highlight = (255, 255, 255, 34)
-    else:  # oled_black
-        fill_bg = (8, 8, 10, 255)
-        border_tint = (38, 38, 44, 255)
-        glass_highlight = (255, 255, 255, 20)
-
-    # Sleek Monochrome Black & Grey palette with subtle mood cues
-    if mood == "listening":
-        border_tint = (225, 29, 72, 220)
-    elif mood in ("thinking", "focus", "working"):
-        border_tint = (217, 119, 6, 220)
-    elif mood in ("done", "speaking"):
-        border_tint = (16, 185, 129, 220)
-    elif mood in ("approval", "curious", "celebrating"):
-        border_tint = (168, 85, 247, 220)
-    elif mood == "media":
-        border_tint = (29, 185, 84, 220)
-    elif mood == "mic_muted":
-        border_tint = (239, 68, 68, 240)
-
     pad = 2
-    if expanded and w >= 200:
-        r = 18
-        # Main Island Container
-        draw.rounded_rectangle([pad, 0, w - pad, h - pad], radius=r, fill=fill_bg, outline=border_tint, width=1)
-        # Specular glass reflection line at the very top edge
-        draw.line([pad + r, 1, w - pad - r, 1], fill=glass_highlight, width=1)
+    x1, y1 = pad, pad
+    x2, y2 = w - pad, h - pad
+    radius = min(w // 2, h // 2, 20) if not expanded else 22
 
-        # Dynamic Island Card Grid
-        top_bar_h = 30
-        bot_margin = 12
+    # 1. Base Glass Material with Vertical Light Refraction
+    glass_surface = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    sdraw = ImageDraw.Draw(glass_surface)
+
+    # Multi-stop vertical refraction gradient
+    for y in range(h):
+        t = y / max(1, h - 1)
+        if t < 0.25:
+            k = t / 0.25
+            r = int(30 + (20 - 30) * k)
+            g = int(36 + (24 - 36) * k)
+            b = int(50 + (34 - 50) * k)
+            a = int(230 + (210 - 230) * k)
+        elif t < 0.8:
+            k = (t - 0.25) / 0.55
+            r = int(20 + (14 - 20) * k)
+            g = int(24 + (16 - 24) * k)
+            b = int(34 + (24 - 34) * k)
+            a = 210
+        else:
+            k = (t - 0.8) / 0.2
+            r = int(14 + (22 - 14) * k)
+            g = int(16 + (26 - 16) * k)
+            b = int(24 + (36 - 24) * k)
+            a = int(210 + (225 - 210) * k)
+        sdraw.line([(0, y), (w, y)], fill=(r, g, b, a))
+
+    # Diagonal Caustic Sheen Beam across the glass (Apple Liquid Glass signature)
+    beam_w = int(w * 0.45)
+    for bx in range(beam_w):
+        bt = math.sin((bx / max(1, beam_w)) * math.pi)
+        alpha_beam = int(24 * bt)
+        sdraw.line([(bx, 0), (bx + int(h * 0.8), h)], fill=(255, 255, 255, alpha_beam), width=1)
+
+    # Rounded pill / card mask
+    mask = Image.new("L", (w, h), 0)
+    mdraw = ImageDraw.Draw(mask)
+    mdraw.rounded_rectangle([x1, y1, x2, y2], radius=radius, fill=255)
+    img.paste(glass_surface, (0, 0), mask)
+
+    # 2. Specular Bevel & Inner Rim Highlights
+    rim_color = (255, 255, 255, 42)
+    draw.rounded_rectangle([x1, y1, x2, y2], radius=radius, outline=rim_color, width=1)
+
+    gleam_inset = radius + 2
+    if x2 - gleam_inset > x1 + gleam_inset:
+        # Crisp specular light catch on top edge
+        draw.line([(x1 + gleam_inset, y1 + 1), (x2 - gleam_inset, y1 + 1)], fill=(255, 255, 255, 110), width=1)
+        draw.line([(x1 + gleam_inset + 4, y1 + 2), (x2 - gleam_inset - 4, y1 + 2)], fill=(255, 255, 255, 40), width=1)
+        draw.line([(x1 + gleam_inset, y2 - 1), (x2 - gleam_inset, y2 - 1)], fill=(255, 255, 255, 25), width=1)
+
+    # 3. If Expanded: Draw Frosted Glass Cards with Inset Highlights
+    if expanded and w >= 220:
+        top_bar_h = 32
+        bot_margin = 14
         left_w = int(w * 0.58)
         left_h = max(20, h - top_bar_h - bot_margin)
+        card_r = 14
 
-        card_bg = (23, 26, 33, 255) if theme == "liquid_glass" else (20, 20, 20, 255)
-        card_border = (45, 50, 65, 255) if theme == "liquid_glass" else (40, 40, 40, 255)
-        card_r = 12
+        card_bg = (24, 28, 42, 195)
+        card_rim = (255, 255, 255, 26)
+        card_gleam = (255, 255, 255, 55)
 
-        # Left Card (AI Assistant & Chat Area)
-        draw.rounded_rectangle([14, top_bar_h, 14 + left_w, top_bar_h + left_h], radius=card_r, fill=card_bg, outline=card_border, width=1)
+        # Left Card (AI Assistant)
+        lx1, ly1 = 14, top_bar_h
+        lx2, ly2 = 14 + left_w, top_bar_h + left_h
+        draw.rounded_rectangle([lx1, ly1, lx2, ly2], radius=card_r, fill=card_bg, outline=card_rim, width=1)
+        draw.line([(lx1 + card_r, ly1 + 1), (lx2 - card_r, ly1 + 1)], fill=card_gleam, width=1)
 
         # Right Cards Column
-        right_x = 14 + left_w + 10
+        right_x = 14 + left_w + 12
         right_w = w - right_x - 14
         if right_w > 10 and left_h > 20:
             gap = 10
             rc_h = max(10, (left_h - gap) // 2)
 
             # Right Card 1 (Now Playing / Clock & Date)
-            draw.rounded_rectangle([right_x, top_bar_h, right_x + right_w, top_bar_h + rc_h], radius=card_r, fill=card_bg, outline=card_border, width=1)
+            rx1, ry1 = right_x, top_bar_h
+            rx2, ry2 = right_x + right_w, top_bar_h + rc_h
+            draw.rounded_rectangle([rx1, ry1, rx2, ry2], radius=card_r, fill=card_bg, outline=card_rim, width=1)
+            draw.line([(rx1 + card_r, ry1 + 1), (rx2 - card_r, ry1 + 1)], fill=card_gleam, width=1)
 
-            # Right Card 2 (Battery & System)
+            # Right Card 2 (Battery & System Telemetry)
             rc2_y = top_bar_h + rc_h + gap
-            draw.rounded_rectangle([right_x, rc2_y, right_x + right_w, top_bar_h + left_h], radius=card_r, fill=card_bg, outline=card_border, width=1)
-    else:
-        # Compact mode
-        if style == "notch":
-            # Hanging top notch: flush at top screen edge, curved at bottom
-            r = min(18, h - 2)
-            pts = [pad, 0, w - pad, 0, w - pad, h - r]
-            steps = 8
-            for i in range(steps + 1):
-                th = (math.pi / 2) * (i / steps)
-                pts.extend([w - pad - r + r * math.cos(th), h - r + r * math.sin(th)])
-            for i in range(steps + 1):
-                th = math.pi / 2 + (math.pi / 2) * (i / steps)
-                pts.extend([pad + r + r * math.cos(th), h - r + r * math.sin(th)])
-            pts.extend([pad, 0])
-            draw.polygon(pts, fill=fill_bg, outline=border_tint)
-            draw.line([pad + r, h - pad, w - pad - r, h - pad], fill=glass_highlight, width=1)
-        else:
-            # Floating Island Capsule
-            r = min(w, h) // 2
-            draw.rounded_rectangle([pad, 0, w - pad, h - pad], radius=r, fill=fill_bg, outline=border_tint, width=1)
-            draw.line([pad + r, 1, w - pad - r, 1], fill=glass_highlight, width=1)
+            rx2_1, ry2_1 = right_x, rc2_y
+            rx2_2, ry2_2 = right_x + right_w, top_bar_h + left_h
+            draw.rounded_rectangle([rx2_1, ry2_1, rx2_2, ry2_2], radius=card_r, fill=card_bg, outline=card_rim, width=1)
+            draw.line([(rx2_1 + card_r, ry2_1 + 1), (rx2_2 - card_r, ry2_1 + 1)], fill=card_gleam, width=1)
 
     return img
 
@@ -600,6 +613,17 @@ class JarvisIslandWidget:
         self.root.configure(bg="#010101")
         try:
             self.root.wm_attributes("-transparentcolor", "#010101")
+            self.root.wm_attributes("-alpha", 0.94)
+        except Exception:
+            pass
+
+        # Windows 11 DWM Rounded Window Corners
+        try:
+            import ctypes
+            dwm = ctypes.windll.dwmapi
+            corner_pref = ctypes.c_int(2)  # DWMWCP_ROUND
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id()) or self.root.winfo_id()
+            dwm.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), ctypes.sizeof(corner_pref))
         except Exception:
             pass
 
@@ -621,15 +645,15 @@ class JarvisIslandWidget:
         self.robo_faces_compact: dict[str, ImageTk.PhotoImage] = {}
         self.robo_faces_expanded: dict[str, ImageTk.PhotoImage] = {}
 
-        # Unified Chat Entry Frame (Monochrome Black & Grey)
-        self.input_frame = tk.Frame(self.canvas, bg="#101010")
+        # Unified Chat Entry Frame (Frosted Glass Slate)
+        self.input_frame = tk.Frame(self.canvas, bg="#181c2a")
         self.entry_var = tk.StringVar()
         self.entry = tk.Entry(
             self.input_frame,
             textvariable=self.entry_var,
-            bg="#101010",
-            fg="#f5f5f5",
-            insertbackground="#e5e5e5",
+            bg="#181c2a",
+            fg="#f8fafc",
+            insertbackground="#e2e8f0",
             font=("Segoe UI", 9),
             bd=0,
             highlightthickness=0
@@ -641,12 +665,12 @@ class JarvisIslandWidget:
         self._placeholder_active = True
         self._set_placeholder()
 
-        # Scrollable Reply Area (Monochrome Black & Grey)
-        self.reply_frame = tk.Frame(self.canvas, bg="#101010")
+        # Scrollable Reply Area (Frosted Glass Slate)
+        self.reply_frame = tk.Frame(self.canvas, bg="#181c2a")
         self.reply_text = tk.Text(
             self.reply_frame,
-            bg="#101010",
-            fg="#d4d4d4",
+            bg="#181c2a",
+            fg="#e2e8f0",
             font=("Segoe UI", 9),
             wrap="word",
             relief="flat",
@@ -743,9 +767,9 @@ class JarvisIslandWidget:
         self.item_agent_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=("Segoe UI", 8), fill="#a3a3a3", state="hidden")
 
         # Input Box Outline & Icons
-        self.item_input_box = self.canvas.create_polygon(0, 0, 0, 0, fill="#101010", outline="#2c2c2c", width=1.0, smooth=True, state="hidden")
-        self.item_btn_send = self.canvas.create_text(0, 0, text="➤", font=("Segoe UI", 9), fill="#a3a3a3", tags="btn_send", state="hidden")
-        self.item_btn_mic = self.canvas.create_text(0, 0, text="🎙", font=("Segoe UI", 10), fill="#f5f5f5", tags="btn_mic", state="hidden")
+        self.item_input_box = self.canvas.create_polygon(0, 0, 0, 0, fill="#181c2a", outline="#384256", width=1.0, smooth=True, state="hidden")
+        self.item_btn_send = self.canvas.create_text(0, 0, text="➤", font=("Segoe UI", 9), fill="#94a3b8", tags="btn_send", state="hidden")
+        self.item_btn_mic = self.canvas.create_text(0, 0, text="🎙", font=("Segoe UI", 10), fill="#f8fafc", tags="btn_mic", state="hidden")
 
         # Reply & Output Text
         self.item_reply_text = self.canvas.create_text(0, 0, anchor="nw", text="", font=("Segoe UI", 9), fill="#d4d4d4", state="hidden")
@@ -1610,7 +1634,7 @@ class JarvisIslandWidget:
             mood = "online"
 
         island_x = (self.WIN_W - w) // 2
-        island_y = 10 if (getattr(self, "island_style", "island") == "island" and not self.expanded) else 0
+        island_y = 10 if not self.expanded else 0
 
         # Background frame positioned at (island_x, island_y)
         bg_photo = self._get_bg_photo(w, h, mood, self.expanded)
@@ -1743,12 +1767,8 @@ class JarvisIslandWidget:
             self.canvas.coords(self.item_compact_robo, island_x + 20, island_y + h / 2)
             self.canvas.itemconfig(self.item_compact_robo, image=robo_img, state="normal")
 
-            # Persistent Mic Mute Dot indicator (red warning dot if system mic is muted)
-            if hasattr(self, "sys_sentinel") and self.sys_sentinel and self.sys_sentinel.get_mic_mute():
-                self.canvas.coords(self.item_mic_indicator, island_x + 28, island_y + 6, island_x + 36, island_y + 14)
-                self.canvas.itemconfig(self.item_mic_indicator, state="normal")
-            else:
-                self.canvas.itemconfig(self.item_mic_indicator, state="hidden")
+            self.canvas.itemconfig(self.item_mic_indicator, state="hidden")
+            is_mic_muted = bool(hasattr(self, "sys_sentinel") and self.sys_sentinel and self.sys_sentinel.get_mic_mute())
 
             is_active_listening = (self.is_listening and self.status_label == "Listening")
             is_active_wave = bool(is_active_listening or self.is_speaking)
@@ -1758,10 +1778,11 @@ class JarvisIslandWidget:
             self.canvas.coords(self.item_compact_title, island_x + 38, island_y + 12)
             self.canvas.itemconfig(self.item_compact_title, text=displayed_title, state="normal")
 
-            badge_txt = self.current_tool_badge or f"● {self.status_label}"
+            badge_txt = self.current_tool_badge or ("🎙️ Mic Muted" if is_mic_muted else f"● {self.status_label}")
+            status_clr = "#f43f5e" if is_mic_muted else self.status_color
             displayed_badge = self._truncate_text_to_width(badge_txt, self.font_compact_status, available_w)
             self.canvas.coords(self.item_compact_status, island_x + 38, island_y + 26)
-            self.canvas.itemconfig(self.item_compact_status, text=displayed_badge, fill=self.status_color, state="normal")
+            self.canvas.itemconfig(self.item_compact_status, text=displayed_badge, fill=status_clr, state="normal")
 
             if is_active_wave:
                 cy = island_y + h / 2
@@ -2203,6 +2224,7 @@ class JarvisIslandWidget:
             getattr(self, "item_mc_prev", None),
             getattr(self, "item_mc_play", None),
             getattr(self, "item_mc_next", None),
+            getattr(self, "item_mic_indicator", None),
         ):
             if item is not None:
                 self.canvas.itemconfig(item, state="hidden")
