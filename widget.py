@@ -371,25 +371,12 @@ def build_twocode_background(
             b = 19 + v
             sdraw.line([(0, y), (sw, y)], fill=(r, g, b, 255))
     else:
-        # EXPANDED MODE: macOS Sonoma / Sequoia Smoked Frosted Glass
-        # Continuous dark obsidian refraction gradient (clean, smooth, no artificial streaks)
+        # EXPANDED MODE: Deep Dark Obsidian Container
         for y in range(sh):
             t = y / max(1, sh - 1)
-            if t < 0.25:
-                k = t / 0.25
-                r = int(24 + (18 - 24) * k)
-                g = int(28 + (22 - 28) * k)
-                b = int(42 + (34 - 42) * k)
-            elif t < 0.8:
-                k = (t - 0.25) / 0.55
-                r = int(18 + (13 - 18) * k)
-                g = int(22 + (16 - 22) * k)
-                b = int(34 + (24 - 34) * k)
-            else:
-                k = (t - 0.8) / 0.2
-                r = int(13 + (17 - 13) * k)
-                g = int(16 + (20 - 16) * k)
-                b = int(24 + (30 - 24) * k)
+            r = int(14 + (8 - 14) * t)
+            g = int(18 + (10 - 18) * t)
+            b = int(28 + (16 - 28) * t)
             sdraw.line([(0, y), (sw, y)], fill=(r, g, b, 255))
 
     # Clean antialiased mask
@@ -408,13 +395,13 @@ def build_twocode_background(
     # Top Edge Specular Gleam (soft horizontal light reflection on upper bezel)
     gleam_inset = radius + 4 * ss
     if x2 - gleam_inset > x1 + gleam_inset:
-        gleam_alpha = 95 if not expanded else 75
+        gleam_alpha = 95 if not expanded else 80
         draw.line([(x1 + gleam_inset, y1 + ss), (x2 - gleam_inset, y1 + ss)],
                   fill=(255, 255, 255, gleam_alpha), width=max(1, ss))
         draw.line([(x1 + gleam_inset + 4 * ss, y1 + 2 * ss), (x2 - gleam_inset - 4 * ss, y1 + 2 * ss)],
                   fill=(255, 255, 255, gleam_alpha // 2), width=max(1, ss))
 
-    # 3. EXPANDED MODE: Frosted Glass Inset Card Panels
+    # 3. EXPANDED MODE: Distinct Frosted Glass Tiles with Visible Depth & Contrast
     if expanded and sw >= 220 * ss:
         top_bar_h = 32 * ss
         bot_margin = 14 * ss
@@ -422,9 +409,9 @@ def build_twocode_background(
         left_h = max(20 * ss, sh - top_bar_h - bot_margin)
         card_r = 16 * ss
 
-        card_bg = (24, 30, 46, 255)
-        card_rim = (255, 255, 255, 24)
-        card_gleam = (255, 255, 255, 50)
+        card_bg = (30, 38, 58, 255)
+        card_rim = (255, 255, 255, 32)
+        card_gleam = (255, 255, 255, 75)
 
         # Left Card (AI Assistant)
         lx1, ly1 = 14 * ss, top_bar_h
@@ -645,10 +632,9 @@ class JarvisIslandWidget:
         self.root.geometry(f"{self.WIN_W}x{self.WIN_H}+{self.win_x}+{self.win_y}")
         self.root.update_idletasks()
 
-        # Windows 11 DWM Hardware-Accelerated Acrylic Backdrop Blur & Rounded Corners
+        # Windows 11 DWM Immersive Dark Mode & Native Rounded Corners
         try:
             import ctypes
-            import BlurWindow.blurWindow as bw
             user32 = ctypes.windll.user32
             dwmapi = ctypes.windll.dwmapi
             hwnd = user32.GetAncestor(self.root.winfo_id(), 2) or self.root.winfo_id()
@@ -660,13 +646,6 @@ class JarvisIslandWidget:
             # 2. Windows 11 DWM Rounded Window Corners (2 = DWMWCP_ROUND)
             corner_pref = ctypes.c_int(2)
             dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), ctypes.sizeof(corner_pref))
-
-            # 3. System Backdrop Acrylic Blur (Win 11 Build 22621+)
-            backdrop_type = ctypes.c_int(3)
-            dwmapi.DwmSetWindowAttribute(hwnd, 38, ctypes.byref(backdrop_type), ctypes.sizeof(backdrop_type))
-
-            # 4. BlurBehind / AccentPolicy Acrylic Blur
-            bw.blur(hwnd, hexColor="#0d111bee", Acrylic=True, Dark=True)
         except Exception:
             pass
 
@@ -687,12 +666,12 @@ class JarvisIslandWidget:
         self.robo_faces_expanded: dict[str, ImageTk.PhotoImage] = {}
 
         # Unified Chat Entry Frame (Mac Frosted Glass Inset)
-        self.input_frame = tk.Frame(self.canvas, bg="#181e2e")
+        self.input_frame = tk.Frame(self.canvas, bg="#1e263a")
         self.entry_var = tk.StringVar()
         self.entry = tk.Entry(
             self.input_frame,
             textvariable=self.entry_var,
-            bg="#181e2e",
+            bg="#1e263a",
             fg="#f8fafc",
             insertbackground="#38bdf8",
             font=("Segoe UI", 9),
@@ -707,10 +686,10 @@ class JarvisIslandWidget:
         self._set_placeholder()
 
         # Scrollable Reply Area (Mac Frosted Glass Inset)
-        self.reply_frame = tk.Frame(self.canvas, bg="#181e2e")
+        self.reply_frame = tk.Frame(self.canvas, bg="#1e263a")
         self.reply_text = tk.Text(
             self.reply_frame,
-            bg="#181e2e",
+            bg="#1e263a",
             fg="#e2e8f0",
             font=("Segoe UI", 9),
             wrap="word",
@@ -808,7 +787,7 @@ class JarvisIslandWidget:
         self.item_agent_status = self.canvas.create_text(0, 0, anchor="w", text="● Ready", font=("Segoe UI", 8), fill="#94a3b8", state="hidden")
 
         # Input Box Outline & Icons
-        self.item_input_box = self.canvas.create_polygon(0, 0, 0, 0, fill="#121624", outline="#2e384d", width=1.0, smooth=True, state="hidden")
+        self.item_input_box = self.canvas.create_polygon(0, 0, 0, 0, fill="#141926", outline="#333f5c", width=1.0, smooth=True, state="hidden")
         self.item_btn_send = self.canvas.create_text(0, 0, text="➤", font=("Segoe UI", 9), fill="#38bdf8", tags="btn_send", state="hidden")
         self.item_btn_mic = self.canvas.create_text(0, 0, text="🎙", font=("Segoe UI", 10), fill="#f8fafc", tags="btn_mic", state="hidden")
 
