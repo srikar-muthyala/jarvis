@@ -352,9 +352,13 @@ def build_twocode_background(
 
     if not expanded:
         # COMPACT MODE: Dynamic Island with Apple Intelligence Fluid Glow Aura
-        cx1, cy1 = 2 * ss, 2 * ss
-        cx2, cy2 = sw - 2 * ss, sh - 2 * ss
-        radius = min((cx2 - cx1) // 2, (cy2 - cy1) // 2)
+        pw = 220 * ss
+        ph = 44 * ss
+        cx1 = (sw - pw) // 2
+        cy1 = 6 * ss
+        cx2 = cx1 + pw
+        cy2 = cy1 + ph
+        radius = ph // 2
 
         # Apple Intelligence Fluid Glow Aura (Amber -> Rose -> Cyan)
         aura = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
@@ -364,15 +368,15 @@ def build_twocode_background(
             t = (ax - (cx1 - aura_pad)) / max(1, (cx2 - cx1 + aura_pad * 2))
             if t < 0.5:
                 kt = t / 0.5
-                ar = int(245 + (244 - 245) * kt)
-                ag = int(158 + (63 - 158) * kt)
-                ab = int(11 + (94 - 11) * kt)
+                ar = int(251 + (244 - 251) * kt)
+                ag = int(191 + (63 - 191) * kt)
+                ab = int(36 + (94 - 36) * kt)
             else:
                 kt = (t - 0.5) / 0.5
                 ar = int(244 + (34 - 244) * kt)
                 ag = int(63 + (211 - 63) * kt)
                 ab = int(94 + (238 - 94) * kt)
-            adraw.line([(ax, cy1 - aura_pad), (ax, cy2 + aura_pad)], fill=(ar, ag, ab, 60))
+            adraw.line([(ax, cy1 - aura_pad), (ax, cy2 + aura_pad)], fill=(ar, ag, ab, 70))
 
         aura_mask = Image.new("L", (sw, sh), 0)
         amdraw = ImageDraw.Draw(aura_mask)
@@ -395,17 +399,70 @@ def build_twocode_background(
         img.paste(island, (0, 0), imask)
 
         # 1px border border-white/10 & top gleam
-        draw.rounded_rectangle([cx1, cy1, cx2, cy2], radius=radius, outline=(255, 255, 255, 34), width=ss)
+        draw.rounded_rectangle([cx1, cy1, cx2, cy2], radius=radius, outline=(255, 255, 255, 36), width=ss)
         draw.line([(cx1 + radius, cy1 + ss), (cx2 - radius, cy1 + ss)], fill=(255, 255, 255, 90), width=ss)
 
     else:
-        # EXPANDED MODE: iOS Frosted Card Deck Architecture (Left Card: 8 Cols, Right: 4 Cols Stack)
-        top_y = 10 * ss
-        deck_h = sh - top_y - 10 * ss
-        left_w = int(sw * 0.60)
-        right_x = left_w + 14 * ss
-        right_w = sw - right_x - 14 * ss
-        card_r = 26 * ss
+        # EXPANDED MODE: Dynamic Island Pill at Top (y: 6->50) + iOS Card Deck (y: 60->340)
+        # 1. Top Dynamic Island Pill
+        pw = 220 * ss
+        ph = 44 * ss
+        px1 = (sw - pw) // 2
+        py1 = 6 * ss
+        px2 = px1 + pw
+        py2 = py1 + ph
+        pradius = ph // 2
+
+        aura = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+        adraw = ImageDraw.Draw(aura)
+        aura_pad = 4 * ss
+        for ax in range(px1 - aura_pad, px2 + aura_pad):
+            t = (ax - (px1 - aura_pad)) / max(1, (px2 - px1 + aura_pad * 2))
+            if t < 0.5:
+                kt = t / 0.5
+                ar = int(251 + (244 - 251) * kt)
+                ag = int(191 + (63 - 191) * kt)
+                ab = int(36 + (94 - 36) * kt)
+            else:
+                kt = (t - 0.5) / 0.5
+                ar = int(244 + (34 - 244) * kt)
+                ag = int(63 + (211 - 63) * kt)
+                ab = int(94 + (238 - 94) * kt)
+            adraw.line([(ax, py1 - aura_pad), (ax, py2 + aura_pad)], fill=(ar, ag, ab, 70))
+
+        aura_mask = Image.new("L", (sw, sh), 0)
+        amdraw = ImageDraw.Draw(aura_mask)
+        amdraw.rounded_rectangle([px1 - aura_pad, py1 - aura_pad, px2 + aura_pad, py2 + aura_pad], radius=pradius + aura_pad, fill=255)
+        aura.putalpha(Image.composite(aura.split()[3], Image.new("L", (sw, sh), 0), aura_mask))
+        aura_blurred = aura.filter(ImageFilter.GaussianBlur(radius=6 * ss))
+        img.paste(aura_blurred, (0, 0), aura_blurred)
+
+        pill_surf = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
+        pdraw = ImageDraw.Draw(pill_surf)
+        for y in range(py1, py2):
+            t = (y - py1) / max(1, (py2 - py1) - 1)
+            v = int(14 * (1.0 - t))
+            pdraw.line([(px1, y), (px2, y)], fill=(8 + v, 10 + v, 15 + v, 255))
+
+        pmask = Image.new("L", (sw, sh), 0)
+        pmdraw = ImageDraw.Draw(pmask)
+        pmdraw.rounded_rectangle([px1, py1, px2, py2], radius=pradius, fill=255)
+        img.paste(pill_surf, (0, 0), pmask)
+        draw.rounded_rectangle([px1, py1, px2, py2], radius=pradius, outline=(255, 255, 255, 36), width=ss)
+        draw.line([(px1 + pradius, py1 + ss), (px2 - pradius, py1 + ss)], fill=(255, 255, 255, 90), width=ss)
+
+        # 2. Expanded 3-Card Deck Architecture
+        deck_y = 60 * ss
+        deck_h = 280 * ss
+        deck_w = 760 * ss
+        deck_x = (sw - deck_w) // 2
+
+        left_w = 460 * ss
+        lx1 = deck_x
+        lx2 = lx1 + left_w
+        ly1 = deck_y
+        ly2 = ly1 + deck_h
+        card_r = 24 * ss
 
         def draw_frosted_card(x1, y1, x2, y2, r, has_cyan_spot=False):
             ch = y2 - y1
@@ -413,16 +470,15 @@ def build_twocode_background(
             cdraw = ImageDraw.Draw(csurf)
             for y in range(y1, y2):
                 t = (y - y1) / max(1, ch - 1)
-                r_c = int(26 + (14 - 26) * t)
-                g_c = int(32 + (18 - 32) * t)
-                b_c = int(48 + (28 - 48) * t)
+                r_c = int(24 - 10 * t)
+                g_c = int(30 - 12 * t)
+                b_c = int(44 - 16 * t)
                 cdraw.line([(x1, y), (x2, y)], fill=(r_c, g_c, b_c, 255))
 
             if has_cyan_spot:
-                # Subtle Ambient Refraction: bg-cyan-500/10 blur-3xl
                 spot = Image.new("RGBA", (sw, sh), (0, 0, 0, 0))
                 spdraw = ImageDraw.Draw(spot)
-                spdraw.ellipse([x1 - 30 * ss, y1 - 30 * ss, x1 + 100 * ss, y1 + 100 * ss], fill=(6, 182, 212, 40))
+                spdraw.ellipse([x1 - 30 * ss, y1 - 30 * ss, x1 + 100 * ss, y1 + 100 * ss], fill=(6, 182, 212, 45))
                 spot_blurred = spot.filter(ImageFilter.GaussianBlur(radius=25 * ss))
                 csurf = Image.alpha_composite(csurf, spot_blurred)
 
@@ -431,43 +487,28 @@ def build_twocode_background(
             cmdraw.rounded_rectangle([x1, y1, x2, y2], radius=r, fill=255)
             img.paste(csurf, (0, 0), cmask)
 
-            # 1px border border-white/10
-            draw.rounded_rectangle([x1, y1, x2, y2], radius=r, outline=(255, 255, 255, 30), width=ss)
-            # Specular top gleam
+            draw.rounded_rectangle([x1, y1, x2, y2], radius=r, outline=(255, 255, 255, 28), width=ss)
             draw.line([(x1 + r, y1 + ss), (x2 - r, y1 + ss)], fill=(255, 255, 255, 75), width=ss)
 
         # Left Card (Assistant Intelligence Deck)
-        lx1, ly1 = 14 * ss, top_y
-        lx2, ly2 = lx1 + left_w, top_y + deck_h
         draw_frosted_card(lx1, ly1, lx2, ly2, card_r, has_cyan_spot=True)
 
         # Right Cards Column
         gap = 10 * ss
+        rx1 = lx2 + gap
+        rx2 = deck_x + deck_w
         rc_h = (deck_h - gap) // 2
 
         # Right Card 1 (iOS Lockscreen Clock Card)
-        rx1, ry1 = right_x, top_y
-        rx2, ry2 = rx1 + right_w, top_y + rc_h
-        draw_frosted_card(rx1, ry1, rx2, ry2, 24 * ss)
+        draw_frosted_card(rx1, deck_y, rx2, deck_y + rc_h, 22 * ss)
 
         # Right Card 2 (iOS Battery & Hardware Telemetry Card)
-        rx2_1, ry2_1 = right_x, top_y + rc_h + gap
-        rx2_2, ry2_2 = rx1 + right_w, top_y + deck_h
-        draw_frosted_card(rx2_1, ry2_1, rx2_2, ry2_2, 24 * ss)
+        draw_frosted_card(rx1, deck_y + rc_h + gap, rx2, deck_y + deck_h, 22 * ss)
 
     # Downsample with high-fidelity Lanczos filter
     final_img = img.resize((w, h), Image.Resampling.LANCZOS)
 
     # Clean colorkey boundary: snap near-colorkey fringe pixels to exact (1, 1, 1)
-    pixels = final_img.load()
-    for py in range(h):
-        for px in range(w):
-            pr, pg, pb, _ = pixels[px, py]
-            if pr < 10 and pg < 10 and pb < 10:
-                pixels[px, py] = (1, 1, 1, 255)
-
-    return final_img
-    # This prevents Windows DWM from rendering ugly black staircase fringes around curved edges
     pixels = final_img.load()
     for py in range(h):
         for px in range(w):
@@ -529,14 +570,14 @@ class JarvisIslandWidget:
             self.asst.ctx.widget = self
 
         # Island Dimensions (Matches React iOS Dynamic Island & Card Architecture)
-        self.W_COMPACT = 210
-        self.W_COMPACT_WAVE = 250
-        self.H_COMPACT = 44
-        self.W_EXPANDED = 760
-        self.H_EXPANDED = 280
+        self.W_COMPACT = 240
+        self.W_COMPACT_WAVE = 240
+        self.H_COMPACT = 56
+        self.W_EXPANDED = 780
+        self.H_EXPANDED = 360
         self.H_REPLY_EXTRA = 60
 
-        # Fixed Window Container Dimensions (never resized during animation ticks)
+        # Fixed Window Container Dimensions
         self.WIN_W = 780
         self.WIN_H = 360
 
@@ -649,27 +690,20 @@ class JarvisIslandWidget:
         self.root.configure(bg="#010101")
         try:
             self.root.wm_attributes("-transparentcolor", "#010101")
-            self.root.wm_attributes("-alpha", 0.94)
         except Exception:
             pass
 
-        self.root.geometry(f"{self.WIN_W}x{self.WIN_H}+{self.win_x}+{self.win_y}")
+        self._update_geometry()
         self.root.update_idletasks()
 
-        # Windows 11 DWM Immersive Dark Mode & Native Rounded Corners
+        # Windows 11 DWM Immersive Dark Mode
         try:
             import ctypes
             user32 = ctypes.windll.user32
             dwmapi = ctypes.windll.dwmapi
             hwnd = user32.GetAncestor(self.root.winfo_id(), 2) or self.root.winfo_id()
-
-            # 1. Dark Mode
             dark = ctypes.c_int(1)
             dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark))
-
-            # 2. Windows 11 DWM Rounded Window Corners (2 = DWMWCP_ROUND)
-            corner_pref = ctypes.c_int(2)
-            dwmapi.DwmSetWindowAttribute(hwnd, 33, ctypes.byref(corner_pref), ctypes.sizeof(corner_pref))
         except Exception:
             pass
 
@@ -1039,54 +1073,20 @@ class JarvisIslandWidget:
         self._last_tick_time = time.perf_counter()
 
     def _recompute_target_size(self):
-        has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None) or getattr(self.asst, "pending_memory_cleanup", False))
-        now = time.perf_counter()
-        is_mic_hud = getattr(self, "hud_mic_active", False) and (now < getattr(self, "hud_mic_until", 0.0))
-        is_vol_hud = getattr(self, "hud_volume_active", False) and (now < getattr(self, "hud_volume_until", 0.0))
-        is_media_active = bool(getattr(self, "media_state", None) and self.media_state.is_playing and not (self.is_speaking or self.is_listening or self.is_thinking))
-
         if not self.expanded:
-            if is_mic_hud:
-                tw = 196.0
-            elif is_vol_hud:
-                tw = 216.0
-            elif is_media_active:
-                # Dynamic width bloom for media title
-                try:
-                    song_lbl = f"{self.media_state.title} • {self.media_state.artist}"
-                    text_w = self.font_compact_title.measure(song_lbl[:26])
-                    tw = max(220.0, min(310.0, 48.0 + text_w + 48.0))
-                except Exception:
-                    tw = 240.0
-            else:
-                # Dynamic horizontal bloom: 118px resting -> 176px when waveform is active (speaking or listening)
-                is_active_wave = bool(self.is_speaking or (self.is_listening and self.status_label == "Listening"))
-                if is_active_wave:
-                    tw = float(self.W_COMPACT_WAVE)
-                else:
-                    # Calculate needed width for text content in compact mode
-                    badge_txt = self.current_tool_badge or f"● {self.status_label}"
-                    try:
-                        title_w = self.font_compact_title.measure("J.A.R.V.I.S.")
-                        badge_w = self.font_compact_status.measure(badge_txt)
-                        needed_w = 38.0 + max(title_w, badge_w) + 18.0
-                        tw = max(float(self.W_COMPACT), min(float(self.W_COMPACT_WAVE), needed_w))
-                    except Exception:
-                        tw = float(self.W_COMPACT)
+            tw = float(self.W_COMPACT)
             th = float(self.H_COMPACT)
-            expanding = (tw > self.cur_w)
+            expanding = False
         else:
             tw = float(self.W_EXPANDED)
-            base_h = float(self.H_EXPANDED)
-            if self.last_reply and len(self.last_reply) > 100:
-                base_h += 40.0
-            if has_approval:
-                base_h += 34.0
-            th = min(320.0, base_h)
+            th = float(self.H_EXPANDED)
             expanding = True
 
-        if tw != getattr(self, "target_w", None) or th != getattr(self, "target_h", None):
-            self._start_transition(tw, th, is_expanding=expanding)
+        self.target_w = tw
+        self.target_h = th
+        self.cur_w = tw
+        self.cur_h = th
+        self._animating = False
 
     def _cancel_collapse_timer(self):
         if getattr(self, "_collapse_timer_id", None) is not None:
@@ -1360,17 +1360,9 @@ class JarvisIslandWidget:
             self.entry.config(fg="#f5f5f5")
             self._placeholder_active = False
 
-        # Ensure input frame is mapped so Tkinter can assign keyboard focus
-        island_x = (self.WIN_W - int(self.cur_w)) // 2
-        island_w = int(self.cur_w)
-        top_bar_h = 30
-        input_y = top_bar_h + 52
-        input_h = 28
-        left_w = int(island_w * 0.58)
-        left_x = island_x + 14
-        input_w = max(60, left_w - 24)
-        entry_w = max(40, input_w - 56)
-        self.input_frame.place(x=left_x + 16, y=input_y + 2, width=entry_w, height=input_h - 4)
+        # Place input_frame exactly inside the iOS prompt pill bar
+        # Left card: x: 10 -> 470, y: 60 -> 340, pill bar: input_y = 294, input_h = 32
+        self.input_frame.place(x=40, y=298, width=344, height=24)
 
         self.keep_on_top(activate=True)
         self.root.lift()
@@ -1470,6 +1462,7 @@ class JarvisIslandWidget:
         else:
             self.expanded = not self.expanded
 
+        self._update_geometry()
         self._recompute_target_size()
         if self.expanded:
             self.root.deiconify()
@@ -1558,7 +1551,13 @@ class JarvisIslandWidget:
                 self.reply_text.config(state="disabled")
 
     def _update_geometry(self):
-        self.root.geometry(f"{self.WIN_W}x{self.WIN_H}+{self.win_x}+{self.win_y}")
+        gw = self.WIN_W if getattr(self, "expanded", False) else 240
+        gh = self.WIN_H if getattr(self, "expanded", False) else 56
+        gx = int((getattr(self, "screen_w", 1920) - gw) / 2)
+        gy = 0
+        self.root.geometry(f"{gw}x{gh}+{gx}+{gy}")
+        if hasattr(self, "canvas"):
+            self.canvas.config(width=gw, height=gh)
 
     def _anim_loop(self):
         try:
@@ -1673,7 +1672,7 @@ class JarvisIslandWidget:
         if w < 10 or h < 10:
             return
 
-        has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None))
+        has_approval = bool(getattr(self.asst, "pending_briefing", False) or getattr(self.asst, "pending_url", None) or getattr(self.asst, "pending_memory_cleanup", False))
         now = time.perf_counter()
 
         is_mic_hud = getattr(self, "hud_mic_active", False) and (now < getattr(self, "hud_mic_until", 0.0))
@@ -1699,16 +1698,12 @@ class JarvisIslandWidget:
         else:
             mood = "online"
 
-        island_x = (self.WIN_W - w) // 2
-        island_y = 10 if not self.expanded else 0
-
-        # Background frame positioned at (island_x, island_y)
         bg_photo = self._get_bg_photo(w, h, mood, self.expanded)
         self.canvas.itemconfig(self.item_bg, image=bg_photo)
-        self.canvas.coords(self.item_bg, island_x, island_y)
+        self.canvas.coords(self.item_bg, 0, 0)
 
         # ----------------------------------------------------------------------
-        # COMPACT NOTCH / ISLAND MODE
+        # COMPACT NOTCH / ISLAND MODE (w = 240, h = 56)
         # ----------------------------------------------------------------------
         if not self.expanded:
             self.input_frame.place_forget()
@@ -1721,6 +1716,8 @@ class JarvisIslandWidget:
                 if b is not None:
                     self.canvas.itemconfig(b, state="hidden")
 
+            cy = 28.0
+
             # CASE A: Mic Sentinel HUD
             if is_mic_hud:
                 self.canvas.itemconfig(self.item_compact_robo, state="hidden")
@@ -1729,15 +1726,15 @@ class JarvisIslandWidget:
                 self._hide_media_compact_items()
                 self._hide_wave_items()
 
-                self.canvas.coords(self.item_hud_icon, island_x + 22, island_y + h / 2)
+                self.canvas.coords(self.item_hud_icon, 24, cy)
                 self.canvas.itemconfig(self.item_hud_icon, text="🎙️", state="normal")
 
                 hud_txt = "MIC MUTED" if self.hud_mic_muted else "MIC ACTIVE"
                 hud_color = "#ef4444" if self.hud_mic_muted else "#10b981"
-                self.canvas.coords(self.item_hud_text, island_x + 40, island_y + 12)
+                self.canvas.coords(self.item_hud_text, 44, cy - 7)
                 self.canvas.itemconfig(self.item_hud_text, text=hud_txt, fill=hud_color, state="normal")
 
-                self.canvas.coords(self.item_hud_sub, island_x + 40, island_y + 26)
+                self.canvas.coords(self.item_hud_sub, 44, cy + 7)
                 self.canvas.itemconfig(self.item_hud_sub, text="Ctrl+Alt+M to toggle", fill="#a3a3a3", state="normal")
 
                 self.canvas.itemconfig(self.item_hud_track, state="hidden")
@@ -1754,16 +1751,14 @@ class JarvisIslandWidget:
                 self._hide_wave_items()
 
                 vol_icon = "🔇" if self.hud_volume_muted else "🔊"
-                self.canvas.coords(self.item_hud_icon, island_x + 22, island_y + h / 2)
+                self.canvas.coords(self.item_hud_icon, 24, cy)
                 self.canvas.itemconfig(self.item_hud_icon, text=vol_icon, state="normal")
 
-                self.canvas.coords(self.item_hud_text, island_x + 40, island_y + h / 2)
+                self.canvas.coords(self.item_hud_text, 44, cy)
                 self.canvas.itemconfig(self.item_hud_text, text=f"{self.hud_volume_val}%", fill="#f5f5f5", state="normal")
 
-                # Horizontal Volume Bar
-                bx = island_x + 78.0
-                bw = max(30.0, float(w - 94.0))
-                cy = island_y + h / 2
+                bx = 82.0
+                bw = 130.0
                 pts_tr = _rounded_rect_points(bx, cy - 3.0, bx + bw, cy + 3.0, r=3.0)
                 self.canvas.coords(self.item_hud_track, pts_tr)
                 self.canvas.itemconfig(self.item_hud_track, fill="#262626", state="normal")
@@ -1791,28 +1786,23 @@ class JarvisIslandWidget:
                 self.canvas.itemconfig(self.item_compact_status, state="hidden")
                 self._hide_wave_items()
 
-                # Spinning vinyl disc indicator
-                cx_disc = island_x + 22.0
-                cy_disc = island_y + h / 2
-                self.canvas.coords(self.item_media_disc, cx_disc - 10, cy_disc - 10, cx_disc + 10, cy_disc + 10)
-                self.canvas.coords(self.item_media_hole, cx_disc - 3, cy_disc - 3, cx_disc + 3, cy_disc + 3)
+                cx_disc = 24.0
+                self.canvas.coords(self.item_media_disc, cx_disc - 10, cy - 10, cx_disc + 10, cy + 10)
+                self.canvas.coords(self.item_media_hole, cx_disc - 3, cy - 3, cx_disc + 3, cy + 3)
                 self.canvas.itemconfig(self.item_media_disc, state="normal")
                 self.canvas.itemconfig(self.item_media_hole, state="normal")
 
-                # Track Title & Artist
-                avail_mw = max(40, int(w) - 76)
+                avail_mw = 135
                 disp_title = self._truncate_text_to_width(self.media_state.title or "Playing", self.font_compact_title, avail_mw)
                 art_lbl = f"{self.media_state.artist} • {self.media_state.source_app}" if self.media_state.artist else self.media_state.source_app
                 disp_artist = self._truncate_text_to_width(art_lbl, self.font_compact_status, avail_mw)
 
-                self.canvas.coords(self.item_media_title, island_x + 40, island_y + 12)
+                self.canvas.coords(self.item_media_title, 42, cy - 7)
                 self.canvas.itemconfig(self.item_media_title, text=disp_title, state="normal")
-
-                self.canvas.coords(self.item_media_artist, island_x + 40, island_y + 26)
+                self.canvas.coords(self.item_media_artist, 42, cy + 7)
                 self.canvas.itemconfig(self.item_media_artist, text=disp_artist, state="normal")
 
-                # Music Equalizer Bars (pulsing vibrant Spotify green)
-                eq_x = island_x + w - 24.0
+                eq_x = 206.0
                 eq_bars = (self.item_media_bar1, self.item_media_bar2, self.item_media_bar3, self.item_media_bar4)
                 eq_offs = (-8.0, -2.5, 3.0, 8.5)
                 eq_freqs = (5.2, 7.1, 4.4, 6.6)
@@ -1820,7 +1810,7 @@ class JarvisIslandWidget:
 
                 for bar_item, off, freq, p_off in zip(eq_bars, eq_offs, eq_freqs, eq_p_offs):
                     bh = max(3.5, min(16.0, 4.0 + 11.0 * abs(math.sin(self._anim_phase * freq + p_off))))
-                    pts = _rounded_rect_points(eq_x + off - 1.2, cy_disc - bh / 2, eq_x + off + 1.2, cy_disc + bh / 2, r=1.2)
+                    pts = _rounded_rect_points(eq_x + off - 1.2, cy - bh / 2, eq_x + off + 1.2, cy + bh / 2, r=1.2)
                     self.canvas.coords(bar_item, pts)
                     self.canvas.itemconfig(bar_item, fill="#1db954", state="normal")
 
@@ -1829,9 +1819,8 @@ class JarvisIslandWidget:
 
             # CASE D: Default Assistant Compact Notch (React iOS Dynamic Island Pill)
             self._hide_media_compact_items()
-            cy = island_y + h / 2.0
             robo_img = self.mascot.get_photo_image(size=26, mood=mood, phase=self._anim_phase)
-            self.canvas.coords(self.item_compact_robo, island_x + 20.0, cy)
+            self.canvas.coords(self.item_compact_robo, 30.0, cy)
             self.canvas.itemconfig(self.item_compact_robo, image=robo_img, state="normal")
 
             self.canvas.itemconfig(self.item_mic_indicator, state="hidden")
@@ -1841,11 +1830,11 @@ class JarvisIslandWidget:
             is_active_wave = bool(is_active_listening or self.is_speaking)
 
             # Title
-            self.canvas.coords(self.item_compact_title, island_x + 38.0, cy)
+            self.canvas.coords(self.item_compact_title, 48.0, cy)
             self.canvas.itemconfig(self.item_compact_title, text="J.A.R.V.I.S.", state="normal")
 
             # Siri-style 3-Bar Animated Waveform
-            wave_cx = island_x + 114.0
+            wave_cx = 124.0
             if is_active_wave:
                 if self.is_speaking:
                     speech_mod = 0.55 + 0.35 * math.sin(self._anim_phase * 3.2) + 0.15 * math.cos(self._anim_phase * 6.5)
@@ -1856,7 +1845,6 @@ class JarvisIslandWidget:
                 b2_h = max(4.0, min(20.0, 6.0 + 14.0 * level * abs(math.sin(self._anim_phase * 6.2 + 1.2))))
                 b3_h = max(3.0, min(14.0, 4.0 + 10.0 * level * abs(math.sin(self._anim_phase * 3.8 + 2.4))))
             else:
-                # Delicate Apple Intelligence Idle Bounce
                 b1_h = max(3.0, 4.0 + 3.0 * abs(math.sin(self._anim_phase * 2.8)))
                 b2_h = max(4.0, 7.0 + 4.0 * abs(math.sin(self._anim_phase * 3.5 + 1.0)))
                 b3_h = max(2.5, 3.5 + 2.5 * abs(math.sin(self._anim_phase * 2.2 + 2.0)))
@@ -1870,65 +1858,87 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_wave_bar1, fill="#22d3ee", state="normal")
             self.canvas.itemconfig(self.item_wave_bar2, fill="#818cf8", state="normal")
             self.canvas.itemconfig(self.item_wave_bar3, fill="#fb7185", state="normal")
-            self.canvas.itemconfig(self.item_wave_bar4, state="hidden")
+            if getattr(self, "item_wave_bar4", None):
+                self.canvas.itemconfig(self.item_wave_bar4, state="hidden")
 
             # Vertical divider
-            div_x = island_x + 130.0
+            div_x = 140.0
             self.canvas.coords(self.item_compact_div, div_x, cy - 8.0, div_x, cy + 8.0)
             self.canvas.itemconfig(self.item_compact_div, fill="#334155", state="normal")
 
             # Status text & chevron
             badge_txt = self.current_tool_badge or ("🎙️ Muted" if is_mic_muted else self.status_label)
             status_clr = "#f43f5e" if is_mic_muted else ("#34d399" if self.status_label == "Ready" else self.status_color)
-            self.canvas.coords(self.item_compact_status, div_x + 7.0, cy)
+            self.canvas.coords(self.item_compact_status, div_x + 8.0, cy)
             self.canvas.itemconfig(self.item_compact_status, text=badge_txt, fill=status_clr, state="normal")
 
-            self.canvas.coords(self.item_compact_chevron, island_x + w - 16.0, cy)
+            self.canvas.coords(self.item_compact_chevron, 214.0, cy)
             self.canvas.itemconfig(self.item_compact_chevron, text="⤢", fill="#64748b", state="normal")
             return
 
-        # Hide compact notch items when expanded
-        self.canvas.itemconfig(self.item_compact_robo, state="hidden")
-        self.canvas.itemconfig(self.item_compact_title, state="hidden")
-        self.canvas.itemconfig(self.item_compact_status, state="hidden")
-        self.canvas.itemconfig(self.item_compact_div, state="hidden")
-        self.canvas.itemconfig(self.item_compact_chevron, state="hidden")
-        self._hide_wave_items()
+        # ----------------------------------------------------------------------
+        # EXPANDED MODE (w = 780, h = 360)
+        # ----------------------------------------------------------------------
         self._hide_media_compact_items()
 
-        # Subtle 50ms stagger delay for internal elements during expansion
-        is_animating = getattr(self, "_animating", False)
-        elapsed = time.perf_counter() - getattr(self, "_anim_start_time", 0.0)
-        if is_animating and getattr(self, "_is_expanding", True) and elapsed < 0.050:
-            self.input_frame.place_forget()
-            self._hide_expanded_items()
-            return
+        # 1. Top Dynamic Island Pill (Centered at 390, y = 6 -> 50, cy = 28.0)
+        pill_x = 280.0
+        cy = 28.0
+        robo_img = self.mascot.get_photo_image(size=26, mood=mood, phase=self._anim_phase)
+        self.canvas.coords(self.item_compact_robo, pill_x + 20.0, cy)
+        self.canvas.itemconfig(self.item_compact_robo, image=robo_img, state="normal")
 
-        # If collapsing, hide internal contents immediately so pill collapses cleanly
-        if is_animating and not getattr(self, "_is_expanding", True):
-            self.input_frame.place_forget()
-            self._hide_expanded_items()
-            return
+        self.canvas.coords(self.item_compact_title, pill_x + 38.0, cy)
+        self.canvas.itemconfig(self.item_compact_title, text="J.A.R.V.I.S.", state="normal")
 
-        # Layout Geometry (iOS Card Architecture: Left Deck 60%, Right Stack 40%)
-        top_y = 10.0
-        deck_h = h - 20.0
-        left_w = int(w * 0.60)
-        card_lx1 = island_x + 14.0
-        card_lx2 = card_lx1 + left_w
-        card_ly1 = island_y + top_y
-        card_ly2 = card_ly1 + deck_h
+        # Siri-style Waveform inside Top Pill
+        wave_cx = pill_x + 114.0
+        b1_h = max(3.0, 4.0 + 3.0 * abs(math.sin(self._anim_phase * 2.8)))
+        b2_h = max(4.0, 7.0 + 4.0 * abs(math.sin(self._anim_phase * 3.5 + 1.0)))
+        b3_h = max(2.5, 3.5 + 2.5 * abs(math.sin(self._anim_phase * 2.2 + 2.0)))
+        pts_b1 = _rounded_rect_points(wave_cx - 5.0, cy - b1_h / 2, wave_cx - 3.0, cy + b1_h / 2, r=1.0)
+        pts_b2 = _rounded_rect_points(wave_cx - 1.0, cy - b2_h / 2, wave_cx + 1.0, cy + b2_h / 2, r=1.0)
+        pts_b3 = _rounded_rect_points(wave_cx + 3.0, cy - b3_h / 2, wave_cx + 5.0, cy + b3_h / 2, r=1.0)
+        self.canvas.coords(self.item_wave_bar1, pts_b1)
+        self.canvas.coords(self.item_wave_bar2, pts_b2)
+        self.canvas.coords(self.item_wave_bar3, pts_b3)
+        self.canvas.itemconfig(self.item_wave_bar1, fill="#22d3ee", state="normal")
+        self.canvas.itemconfig(self.item_wave_bar2, fill="#818cf8", state="normal")
+        self.canvas.itemconfig(self.item_wave_bar3, fill="#fb7185", state="normal")
+
+        div_x = pill_x + 130.0
+        self.canvas.coords(self.item_compact_div, div_x, cy - 8.0, div_x, cy + 8.0)
+        self.canvas.itemconfig(self.item_compact_div, fill="#334155", state="normal")
+
+        is_mic_muted = bool(hasattr(self, "sys_sentinel") and self.sys_sentinel and self.sys_sentinel.get_mic_mute())
+        badge_txt = self.current_tool_badge or ("🎙️ Muted" if is_mic_muted else self.status_label)
+        status_clr = "#f43f5e" if is_mic_muted else ("#34d399" if self.status_label == "Ready" else self.status_color)
+        self.canvas.coords(self.item_compact_status, div_x + 8.0, cy)
+        self.canvas.itemconfig(self.item_compact_status, text=badge_txt, fill=status_clr, state="normal")
+
+        self.canvas.coords(self.item_compact_chevron, pill_x + 204.0, cy)
+        self.canvas.itemconfig(self.item_compact_chevron, text="⤡", fill="#64748b", state="normal")
+
+        # 2. Expanded 3-Card Deck Architecture (y: 60 -> 340)
+        deck_y = 60.0
+        deck_h = 280.0
+        left_w = 460.0
+        card_lx1 = 10.0
+        card_lx2 = card_lx1 + left_w  # 470.0
+        card_ly1 = deck_y             # 60.0
+        card_ly2 = card_ly1 + deck_h  # 340.0
 
         gap = 10.0
-        right_x = card_lx2 + gap
-        right_w = (island_x + w) - right_x - 14.0
-        rc_h = (deck_h - gap) // 2
+        right_x = card_lx2 + gap      # 480.0
+        right_w = 290.0
+        rx2 = right_x + right_w       # 770.0
+        rc_h = (deck_h - gap) // 2    # 135.0
 
-        # ---------------- 1. LEFT CARD: ASSISTANT INTELLIGENCE DECK ----------------
+        # --- LEFT CARD: ASSISTANT INTELLIGENCE DECK ---
         # Header (Top of Left Card)
-        robo_img = self.mascot.get_photo_image(size=30, mood=mood, phase=self._anim_phase)
+        robo_large = self.mascot.get_photo_image(size=30, mood=mood, phase=self._anim_phase)
         self.canvas.coords(self.item_agent_robo, card_lx1 + 26.0, card_ly1 + 24.0)
-        self.canvas.itemconfig(self.item_agent_robo, image=robo_img, state="normal")
+        self.canvas.itemconfig(self.item_agent_robo, image=robo_large, state="normal")
 
         self.canvas.coords(self.item_agent_title, card_lx1 + 48.0, card_ly1 + 17.0)
         self.canvas.itemconfig(self.item_agent_title, text="Assistant Intelligence", state="normal")
@@ -1938,7 +1948,7 @@ class JarvisIslandWidget:
         # Optimal / Status Pill Badge
         badge_w = 58.0
         badge_h = 20.0
-        bx2 = card_lx2 - 20.0
+        bx2 = card_lx2 - 16.0
         bx1 = bx2 - badge_w
         by1 = card_ly1 + 14.0
         by2 = by1 + badge_h
@@ -1963,10 +1973,10 @@ class JarvisIslandWidget:
         self.canvas.itemconfig(self.item_agent_badge, text=badge_txt, fill=t_fill, state="normal")
 
         # Bottom Prompt Pill Bar (iOS Frosted Pill Bar)
-        input_y = card_ly2 - 46.0
+        input_y = card_ly2 - 46.0   # 294.0
         input_h = 32.0
-        input_x1 = card_lx1 + 16.0
-        input_x2 = card_lx2 - 16.0
+        input_x1 = card_lx1 + 16.0  # 26.0
+        input_x2 = card_lx2 - 16.0  # 454.0
         input_w = input_x2 - input_x1
         pts_in = _rounded_rect_points(input_x1, input_y, input_x2, input_y + input_h, r=16.0)
         self.canvas.coords(self.item_input_box, pts_in)
@@ -2001,9 +2011,9 @@ class JarvisIslandWidget:
 
         # Middle Response Bubble & Action Chips
         bubble_x1 = card_lx1 + 16.0
-        bubble_y1 = card_ly1 + 48.0
-        bubble_x2 = card_lx2 - 16.0
-        bubble_y2 = input_y - 8.0
+        bubble_y1 = card_ly1 + 48.0   # 108.0
+        bubble_x2 = card_lx2 - 16.0   # 454.0
+        bubble_y2 = input_y - 8.0     # 286.0
 
         if has_approval and left_w >= 140:
             if getattr(self.asst, "pending_url", None):
@@ -2070,11 +2080,10 @@ class JarvisIslandWidget:
         self.reply_frame.place(x=int(bubble_x1 + 6.0), y=int(bubble_y1 + 6.0), width=int(bubble_x2 - bubble_x1 - 12.0), height=int(avail_h))
         self.canvas.itemconfig(self.item_reply_text, state="hidden")
 
-        # ---------------- 2. RIGHT CARD 1: IOS LOCKSCREEN CLOCK CARD ----------------
-        rx1 = right_x
-        ry1 = card_ly1
-        rx2 = rx1 + right_w
-        ry2 = ry1 + rc_h
+        # --- RIGHT CARD 1: IOS LOCKSCREEN CLOCK CARD ---
+        rx1 = right_x                # 480.0
+        ry1 = card_ly1               # 60.0
+        ry2 = ry1 + rc_h             # 195.0
 
         # Header: CLOCK + Window Control Buttons (— and ✕)
         self.canvas.coords(self.item_clock_hdr, rx1 + 16.0, ry1 + 14.0)
@@ -2090,10 +2099,10 @@ class JarvisIslandWidget:
         self.canvas.itemconfig(self.item_btn_close, text="✕", state="normal")
 
         # Large Digital Time & Date
-        now = datetime.datetime.now()
-        hh_str = now.strftime("%H")
-        mm_str = now.strftime("%M")
-        date_str = now.strftime("%A, %d %b")
+        now_dt = datetime.datetime.now()
+        hh_str = now_dt.strftime("%H")
+        mm_str = now_dt.strftime("%M")
+        date_str = now_dt.strftime("%A, %d %b")
 
         colon_val = int(140 + 115 * math.sin(self._anim_phase * 2.8))
         colon_fill = f"#{colon_val:02x}{colon_val:02x}{colon_val:02x}"
@@ -2128,20 +2137,20 @@ class JarvisIslandWidget:
         self.canvas.coords(self.item_clock_footer, rx1 + 16.0, ry1 + 104.0)
         self.canvas.itemconfig(self.item_clock_footer, text=footer_txt, fill=footer_clr, state="normal")
 
-        # ---------------- 3. RIGHT CARD 2: BATTERY & TELEMETRY CARD ----------------
-        rx2_1 = right_x
-        ry2_1 = ry2 + gap
-        rx2_2 = rx2_1 + right_w
-        ry2_2 = ry2_1 + rc_h
+        # --- RIGHT CARD 2: BATTERY & TELEMETRY CARD ---
+        rx2_1 = right_x              # 480.0
+        ry2_1 = ry2 + gap            # 205.0
+        rx2_2 = rx2                  # 770.0
+        ry2_2 = ry2_1 + rc_h         # 340.0
 
         # Battery Badge & Tag
         bat_str = self.telemetry.get("bat", "44% Charging")
         is_charging = "Charging" in bat_str or "Plugged" in bat_str
 
-        bx1 = rx2_1 + 16.0
-        by1 = ry2_1 + 14.0
-        bx2 = bx1 + 24.0
-        by2 = by1 + 24.0
+        bx1 = rx2_1 + 16.0           # 496.0
+        by1 = ry2_1 + 14.0           # 219.0
+        bx2 = bx1 + 24.0             # 520.0
+        by2 = by1 + 24.0             # 243.0
         pts_bg = _rounded_rect_points(bx1, by1, bx2, by2, r=6.0)
         self.canvas.coords(self.item_bat_badge, pts_bg)
         self.canvas.itemconfig(self.item_bat_badge, fill="#064e3b", outline="#059669", state="normal")
@@ -2247,10 +2256,6 @@ class JarvisIslandWidget:
             getattr(self, "item_ram_lbl", None),
             getattr(self, "item_ram_track", None),
             getattr(self, "item_ram_fill", None),
-            getattr(self, "item_wave_bar1", None),
-            getattr(self, "item_wave_bar2", None),
-            getattr(self, "item_wave_bar3", None),
-            getattr(self, "item_wave_bar4", None),
             getattr(self, "item_btn_style_toggle", None),
             getattr(self, "item_mc_badge", None),
             getattr(self, "item_mc_title", None),
@@ -2391,34 +2396,17 @@ class JarvisIslandWidget:
                 pass
             self._reset_timer_id = None
         x, y = event.x, event.y
-        w = int(self.cur_w)
-        h = int(self.cur_h)
-        island_x = (self.WIN_W - w) // 2
 
         # Any user click locks the widget open
         self.hover_expanded = False
-
-        # Click outside the island
-        if not (island_x <= x <= island_x + w and 0 <= y <= h):
-            if self.expanded:
-                self.toggle_expand(False)
-            return
-
-        # Check Action / Approval Chips
-        if self.chip_approve_bbox and (self.chip_approve_bbox[0] <= x <= self.chip_approve_bbox[2] and self.chip_approve_bbox[1] <= y <= self.chip_approve_bbox[3]):
-            self._on_approve_click()
-            return
-        if self.chip_deny_bbox and (self.chip_deny_bbox[0] <= x <= self.chip_deny_bbox[2] and self.chip_deny_bbox[1] <= y <= self.chip_deny_bbox[3]):
-            self._on_deny_click()
-            return
 
         if not self.expanded:
             self.toggle_expand(True)
             return
 
-        # Check Style Toggle Button (Island vs Notch)
-        if (island_x + w - 66 <= x <= island_x + w - 46) and (4 <= y <= 26):
-            self.toggle_island_style()
+        # Check clicking Top Island Pill to collapse (Matches React Dynamic Island Pill click)
+        if 280 <= x <= 500 and 6 <= y <= 50:
+            self.toggle_expand(False)
             return
 
         # Check Minimize Button (—)
@@ -2435,24 +2423,13 @@ class JarvisIslandWidget:
                 self.toggle_expand(False)
                 return
 
-        # Check Media Card Playback Controls in Right Card 1
-        has_media = bool(getattr(self, "media_state", None) and self.media_state.is_active)
-        if has_media:
-            left_w = int(w * 0.60)
-            left_x = island_x + 14
-            gap = 10
-            right_x = left_x + left_w + gap
-            right_w = (island_x + w) - right_x - 14
-            ctrl_y = 10 + 36
-            if (abs(x - (right_x + right_w - 60)) <= 12) and (abs(y - ctrl_y) <= 12):
-                self._on_media_prev()
-                return
-            if (abs(x - (right_x + right_w - 38)) <= 12) and (abs(y - ctrl_y) <= 12):
-                self._on_media_toggle()
-                return
-            if (abs(x - (right_x + right_w - 16)) <= 12) and (abs(y - ctrl_y) <= 12):
-                self._on_media_next()
-                return
+        # Check Action / Approval Chips
+        if self.chip_approve_bbox and (self.chip_approve_bbox[0] <= x <= self.chip_approve_bbox[2] and self.chip_approve_bbox[1] <= y <= self.chip_approve_bbox[3]):
+            self._on_approve_click()
+            return
+        if self.chip_deny_bbox and (self.chip_deny_bbox[0] <= x <= self.chip_deny_bbox[2] and self.chip_deny_bbox[1] <= y <= self.chip_deny_bbox[3]):
+            self._on_deny_click()
+            return
 
         # Check Mic button
         if hasattr(self, "_btn_mic_cx") and hasattr(self, "_btn_mic_cy"):
