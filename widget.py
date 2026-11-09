@@ -526,23 +526,24 @@ def _rounded_rect_points(x1: float, y1: float, x2: float, y2: float, r: float = 
     ]
 
 
-def make_ios_spring(stiffness: float = 380.0, damping: float = 32.0, mass: float = 0.8):
-    """Exact analytic closed-form damped harmonic oscillator for native iOS spring physics."""
-    w0 = math.sqrt(stiffness / mass)           # ~21.794
-    gamma = damping / (2.0 * mass)             # 20.0
-    wd = math.sqrt(w0**2 - gamma**2)           # ~8.660
+def make_ios_spring(stiffness: float = 300.0, damping: float = 28.0, mass: float = 0.8):
+    """Exact analytic closed-form damped harmonic oscillator for native fluid iOS spring physics.
+    stiffness: 300, damping: 28, mass: 0.8 -> no bouncy overshoot, fluid inertia."""
+    w0 = math.sqrt(stiffness / mass)           # ~19.3649
+    gamma = damping / (2.0 * mass)             # 17.5
+    wd = math.sqrt(w0**2 - gamma**2)           # ~8.29156
     def solve(t_norm: float) -> float:
-        t = t_norm * 0.36
+        t = t_norm * 0.35
         if t <= 0.0:
             return 0.0
-        if t >= 0.36:
+        if t >= 0.35:
             return 1.0
         val = 1.0 - math.exp(-gamma * t) * (math.cos(wd * t) + (gamma / wd) * math.sin(wd * t))
-        return max(0.0, min(1.02, val))
+        return max(0.0, min(1.0, val))
     return solve
 
 
-IOS_SPRING = make_ios_spring(380.0, 32.0, 0.8)
+IOS_SPRING = make_ios_spring(300.0, 28.0, 0.8)
 
 
 class IconManager:
@@ -842,9 +843,13 @@ class JarvisIslandWidget:
 
         # Pre-render sub-pixel Dynamic Island & Deck layers
         print("  [Island] Pre-rendering sub-pixel Dynamic Island & Deck layers...")
+        self._spring_solver = IOS_SPRING
+        self._anim_progress: float = 0.0
+        self._anim_direction: str = "open"
+        self._frames_open: list[ImageTk.PhotoImage] = []
+        self._frames_close: list[ImageTk.PhotoImage] = []
         self._pill_layer = render_pill_layer(self.WIN_W, self.WIN_H, ss=3)
         self._deck_layer = render_deck_layer(self.WIN_W, self.WIN_H, ss=3)
-        self._morph_bg_cache: dict[float, ImageTk.PhotoImage] = {}
         self._prewarm_bg_cache()
 
         # Restrict clickable footprint strictly to Dynamic Island Pill on launch
@@ -1090,60 +1095,125 @@ class JarvisIslandWidget:
         if not self.entry_var.get().strip():
             self._set_placeholder()
 
-    def _compose_bg_frame(self, t: float) -> Image.Image:
-        out = Image.new("RGBA", (self.WIN_W, self.WIN_H), (1, 1, 1, 255))
-        if t > 0.01 and getattr(self, "_deck_layer", None) is not None:
-            cx = self.WIN_W / 2.0
-            # Expanding squircle wrapper unrolling directly out of pill container
-            w_wrap = 220.0 + (760.0 - 220.0) * t
+    def _build_morph_frame(self, p: float, direction: str = "open") -> Image.Image:
+        """Build morph background frame with transform-origin: top center physics and zero artifacts."""
+        w, h = self.WIN_W, self.WIN_H
+        cx = w / 2.0
+        top_y = 50.0
+
+        val = self._spring_solver(p)
+
+        if direction == "open":
+            scale = 0.96 + 0.04 * val
+            y_shift = -24.0 * (1.0 - val)
+            y2_wrap = 50.0 + 290.0 * val
+            w_wrap = 220.0 + (760.0 - 220.0) * val
+        else:  # close
+            scale = 1.0 - 0.03 * val
+            y_shift = -16.0 * val
+            y2_wrap = 340.0 - 290.0 * val
+            w_wrap = 760.0 - (760.0 - 220.0) * val
+
+        out = Image.new("RGBA", (w, h), (1, 1, 1, 255))
+
+        if y2_wrap > 52.0 and getattr(self, "_deck_layer", None) is not None:
+            # Scaled deck layer with transform-origin: top center
+            nw = max(10, int(w * scale))
+            nh = max(10, int(h * scale))
+            deck_scaled = self._deck_layer.resize((nw, nh), Image.Resampling.BILINEAR)
+
+            dx = int(cx - (cx * scale))
+            dy = int(top_y - (top_y * scale) + y_shift)
+
+            deck_canvas = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+            deck_canvas.paste(deck_scaled, (dx, dy))
+
+            mask = Image.new("L", (w, h), 0)
+            mdraw = ImageDraw.Draw(mask)
             x1_wrap = cx - w_wrap / 2.0
             x2_wrap = cx + w_wrap / 2.0
-            y1_wrap = 50.0
-            y2_wrap = 50.0 + (340.0 - 50.0) * t
-            r = min(28.0, w_wrap / 2.0, (y2_wrap - y1_wrap) / 2.0 if y2_wrap > y1_wrap else 0)
+            r = min(28.0, w_wrap / 2.0, (y2_wrap - 50.0) / 2.0)
+            mdraw.rounded_rectangle([int(x1_wrap), 50, int(x2_wrap), int(y2_wrap)], radius=int(r), fill=255)
 
-            dy = int(-8.0 * (1.0 - t))
-            alpha = min(1.0, max(0.0, (t - 0.1) / 0.9))
-
-            r_c, g_c, b_c, a_c = self._deck_layer.split()
-            a_mod = a_c.point(lambda p: int(p * alpha))
-            deck_mod = Image.merge("RGBA", (r_c, g_c, b_c, a_mod))
-
-            mask = Image.new("L", (self.WIN_W, self.WIN_H), 0)
-            mdraw = ImageDraw.Draw(mask)
-            mdraw.rounded_rectangle([int(x1_wrap), int(y1_wrap), int(x2_wrap), int(y2_wrap)], radius=int(r), fill=255)
-
-            deck_shifted = Image.new("RGBA", (self.WIN_W, self.WIN_H), (0, 0, 0, 0))
-            deck_shifted.paste(deck_mod, (0, dy), deck_mod)
-            out.paste(deck_shifted, (0, 0), mask)
+            out.paste(deck_canvas, (0, 0), mask)
 
         if getattr(self, "_pill_layer", None) is not None:
             out.paste(self._pill_layer, (0, 0), self._pill_layer)
 
-        pixels = out.load()
-        for py in range(self.WIN_H):
-            for px in range(self.WIN_W):
-                pr, pg, pb, _ = pixels[px, py]
-                if pr < 10 and pg < 10 and pb < 10:
-                    pixels[px, py] = (1, 1, 1, 255)
         return out
 
+    def _transform_pt(self, x: float, y: float, tier: int = 0) -> tuple[float, float, float]:
+        """Transform coordinates with transform-origin: top center (cx=390, top_y=50) and tier-staggered delay.
+        Returns (tx, ty, opacity)
+        """
+        cx = self.WIN_W / 2.0
+        top_y = 50.0
+
+        if getattr(self, "_morph_animating", False):
+            p = getattr(self, "_anim_progress", 0.0)
+            val = self._spring_solver(p)
+            direction = getattr(self, "_anim_direction", "open")
+
+            if direction == "open":
+                scale = 0.96 + 0.04 * val
+                y_shift = -24.0 * (1.0 - val)
+                delay = min(0.40, tier * 0.10)
+                if val <= delay:
+                    p_child = 0.0
+                else:
+                    p_child = min(1.0, (val - delay) / (1.0 - delay))
+                child_y = -8.0 * (1.0 - p_child)
+                opacity = p_child
+            else:  # close
+                scale = 1.0 - 0.03 * val
+                y_shift = -16.0 * val
+                delay = min(0.40, (4 - tier) * 0.06)
+                if val <= delay:
+                    p_child = 0.0
+                else:
+                    p_child = min(1.0, (val - delay) / (1.0 - delay))
+                child_y = -8.0 * p_child
+                opacity = 1.0 - p_child
+        elif self.expanded:
+            scale = 1.0
+            y_shift = 0.0
+            child_y = 0.0
+            opacity = 1.0
+        else:
+            scale = 0.96
+            y_shift = -24.0
+            child_y = -8.0
+            opacity = 0.0
+
+        tx = cx + (x - cx) * scale
+        ty = top_y + (y - top_y) * scale + y_shift + child_y
+        return tx, ty, opacity
+
     def _prewarm_bg_cache(self):
-        for step in range(17):
-            k = round(step / 16.0, 4)
-            img = self._compose_bg_frame(k)
-            self._morph_bg_cache[k] = ImageTk.PhotoImage(img)
+        """Prewarm 25 open frames and 25 close frames for zero-latency 60fps+ animation."""
+        self._frames_open = []
+        self._frames_close = []
+        for i in range(25):
+            p = i / 24.0
+            img_open = self._build_morph_frame(p, direction="open")
+            self._frames_open.append(ImageTk.PhotoImage(img_open))
+            img_close = self._build_morph_frame(p, direction="close")
+            self._frames_close.append(ImageTk.PhotoImage(img_close))
 
     def _get_bg_photo(self, w: int, h: int, mood: str, expanded: bool, anim_t: float | None = None) -> ImageTk.PhotoImage:
-        t = anim_t if anim_t is not None else getattr(self, "anim_t", 1.0 if expanded else 0.0)
-        step = int(round(max(0.0, min(1.0, t)) * 16))
-        key = round(step / 16.0, 4)
-        if key in self._morph_bg_cache:
-            return self._morph_bg_cache[key]
-
-        photo = ImageTk.PhotoImage(self._compose_bg_frame(key))
-        self._morph_bg_cache[key] = photo
-        return photo
+        if not getattr(self, "_frames_open", None):
+            return ImageTk.PhotoImage(Image.new("RGBA", (w, h), (1, 1, 1, 255)))
+        if getattr(self, "_morph_animating", False):
+            p = getattr(self, "_anim_progress", 0.0)
+            idx = max(0, min(24, int(round(p * 24))))
+            if getattr(self, "_anim_direction", "open") == "open":
+                return self._frames_open[idx]
+            else:
+                return self._frames_close[idx]
+        elif self.expanded:
+            return self._frames_open[24]
+        else:
+            return self._frames_open[0]
 
     def _check_first_daily_run(self):
         if hasattr(self.asst, "check_daily_briefing_prompt"):
@@ -1624,10 +1694,10 @@ class JarvisIslandWidget:
             return
 
         self.expanded = target
-        self._anim_start_t = self.anim_t
-        self.target_t = 1.0 if target else 0.0
+        self._anim_direction = "open" if target else "close"
+        self._anim_progress = 0.0
         self._anim_start_time = time.perf_counter()
-        self._anim_duration = 0.400 if target else 0.350
+        self._anim_duration = 0.350
         self._morph_animating = True
 
         self._update_geometry()
@@ -1643,9 +1713,8 @@ class JarvisIslandWidget:
             self.root.after(180, self.focus_input)
         else:
             self.hover_expanded = False
-            self.input_frame.place_forget()
-            if hasattr(self, "reply_frame"):
-                self.reply_frame.place_forget()
+            # Seamless exit: Keep input_frame and reply_frame mounted during collapse animation;
+            # they will smoothly slide/fade out and only unmount once the spring reaches zero!
             self.keep_on_top(activate=False)
 
     def _on_reply_scroll(self, event):
@@ -1796,16 +1865,26 @@ class JarvisIslandWidget:
             # Smooth response streaming reveal
             self._update_reply_stream()
 
-            # Dynamic Island Morph Continuous Animation Step (Exact iOS Spring)
+            # Dynamic Island Morph Continuous Animation Step (Fluid iOS Spring: 300 / 28 / 0.8)
             if getattr(self, "_morph_animating", False):
                 elapsed = now - self._anim_start_time
-                progress = min(1.0, max(0.0, elapsed / self._anim_duration))
-                eased = IOS_SPRING(progress)
-                self.anim_t = self._anim_start_t + (self.target_t - self._anim_start_t) * eased
-                if progress >= 1.0:
-                    self.anim_t = self.target_t
-                    self._morph_animating = False
-                    if self.target_t == 0.0:
+                self._anim_progress = min(1.0, max(0.0, elapsed / self._anim_duration))
+                val = self._spring_solver(self._anim_progress)
+                if self._anim_direction == "open":
+                    self.anim_t = val
+                    if self._anim_progress >= 1.0:
+                        self.anim_t = 1.0
+                        self._morph_animating = False
+                else:  # close
+                    self.anim_t = 1.0 - val
+                    if self._anim_progress >= 1.0:
+                        self.anim_t = 0.0
+                        self._morph_animating = False
+                        # Now that collapse animation has 100% completed, safely unmount frames and reset window region
+                        self.input_frame.place_forget()
+                        if hasattr(self, "reply_frame"):
+                            self.reply_frame.place_forget()
+                        self._hide_expanded_items()
                         self._update_window_region(False)
 
             if getattr(self, "_animating", False):
@@ -2064,60 +2143,68 @@ class JarvisIslandWidget:
             self.canvas.coords(self.item_compact_chevron_bg, btn_cx - r_btn, cy - r_btn, btn_cx + r_btn, cy + r_btn)
             self.canvas.itemconfig(self.item_compact_chevron_bg, fill="#1e2538", outline="#334155", state="normal")
 
-            chevron_angle = 180.0 * self.anim_t
-            chevron_clr = "#38bdf8" if self.anim_t >= 0.5 else "#94a3b8"
+            # Chevron rotation synced directly to spring physics curve
+            if getattr(self, "_morph_animating", False):
+                p = getattr(self, "_anim_progress", 0.0)
+                val = self._spring_solver(p)
+                if getattr(self, "_anim_direction", "open") == "open":
+                    chevron_angle = 180.0 * val
+                else:
+                    chevron_angle = 180.0 * (1.0 - val)
+            elif self.expanded:
+                chevron_angle = 180.0
+            else:
+                chevron_angle = 0.0
+
+            chevron_clr = "#38bdf8" if chevron_angle >= 90.0 else "#94a3b8"
             chevron_img = self.icon_mgr.get_icon("chevron", size=14, color=chevron_clr, angle=chevron_angle, scale_factor=scale_btn)
             self.canvas.coords(self.item_compact_chevron, btn_cx, cy)
             self.canvas.itemconfig(self.item_compact_chevron, image=chevron_img, state="normal")
 
         # ----------------------------------------------------------------------
-        # 2. EXPANDED 3-CARD DECK (Unrolls directly out of pill container)
+        # 2. EXPANDED 3-CARD DECK (Transform-origin: top center, fluid spring physics)
         # ----------------------------------------------------------------------
-        if self.anim_t <= 0.01:
+        if getattr(self, "_morph_animating", False):
+            p = getattr(self, "_anim_progress", 0.0)
+            val = self._spring_solver(p)
+            if getattr(self, "_anim_direction", "open") == "open":
+                y2_wrap = 50.0 + 290.0 * val
+            else:
+                y2_wrap = 340.0 - 290.0 * val
+        elif self.expanded:
+            y2_wrap = 340.0
+        else:
+            y2_wrap = 50.0
+
+        if y2_wrap <= 52.0:
             self._hide_expanded_items()
             self.input_frame.place_forget()
             if hasattr(self, "reply_frame"):
                 self.reply_frame.place_forget()
             return
 
-        dy = -8.0 * (1.0 - self.anim_t)
-        deck_y = 60.0 + dy
-        deck_h = 280.0
-        left_w = 460.0
-        card_lx1 = 10.0
-        card_lx2 = card_lx1 + left_w  # 470.0
-        card_ly1 = deck_y
-        card_ly2 = card_ly1 + deck_h
-
-        gap = 10.0
-        right_x = card_lx2 + gap      # 480.0
-        right_w = 290.0
-        rx2 = right_x + right_w       # 770.0
-        rc_h = (deck_h - gap) // 2    # 135.0
-
-        y2_wrap = 50.0 + 290.0 * self.anim_t
-
         # --- LEFT CARD: ASSISTANT INTELLIGENCE DECK ---
-        if y2_wrap >= 90.0:
+        # Tier 1: Mascot & Header Title & Status Badge
+        r_tx, r_ty, op_t1 = self._transform_pt(36.0, 84.0, tier=1)
+        if r_ty <= y2_wrap and op_t1 > 0.02:
             robo_large = self.mascot.get_photo_image(size=30, mood=mood, phase=self._anim_phase)
-            self.canvas.coords(self.item_agent_robo, card_lx1 + 26.0, card_ly1 + 24.0)
+            self.canvas.coords(self.item_agent_robo, r_tx, r_ty)
             self.canvas.itemconfig(self.item_agent_robo, image=robo_large, state="normal")
 
-            self.canvas.coords(self.item_agent_title, card_lx1 + 48.0, card_ly1 + 17.0)
+            t_x, t_y, _ = self._transform_pt(58.0, 77.0, tier=1)
+            self.canvas.coords(self.item_agent_title, t_x, t_y)
             self.canvas.itemconfig(self.item_agent_title, text="Assistant Intelligence", state="normal")
-            self.canvas.coords(self.item_agent_sub, card_lx1 + 48.0, card_ly1 + 31.0)
+
+            s_x, s_y, _ = self._transform_pt(58.0, 91.0, tier=1)
+            self.canvas.coords(self.item_agent_sub, s_x, s_y)
             self.canvas.itemconfig(self.item_agent_sub, text="NEURAL LINK // ACTIVE", state="normal")
 
             # Optimal / Status Pill Badge
-            badge_w = 58.0
-            badge_h = 20.0
-            bx2 = card_lx2 - 16.0
-            bx1 = bx2 - badge_w
-            by1 = card_ly1 + 14.0
-            by2 = by1 + badge_h
-            pts_badge = _rounded_rect_points(bx1, by1, bx2, by2, r=10.0)
+            b_x1, b_y1, _ = self._transform_pt(396.0, 74.0, tier=1)
+            b_x2, b_y2, _ = self._transform_pt(454.0, 94.0, tier=1)
+            pts_badge = _rounded_rect_points(b_x1, b_y1, b_x2, b_y2, r=10.0)
             self.canvas.coords(self.item_agent_badge_bg, pts_badge)
-            self.canvas.coords(self.item_agent_badge, (bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
+            self.canvas.coords(self.item_agent_badge, (b_x1 + b_x2) / 2.0, (b_y1 + b_y2) / 2.0)
 
             if self.is_listening:
                 badge_txt = "Listening"
@@ -2141,26 +2228,29 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_agent_badge_bg, state="hidden")
             self.canvas.itemconfig(self.item_agent_badge, state="hidden")
 
-        # Bottom Prompt Pill Bar (iOS Frosted Pill Bar with High-DPI Vector Mic & Send Icons)
-        input_y = card_ly2 - 46.0
-        input_h = 32.0
-        input_x1 = card_lx1 + 16.0
-        input_x2 = card_lx2 - 16.0
-        input_w = input_x2 - input_x1
+        # Tier 4: Bottom Prompt Pill Bar & Input Frame
+        ix1, iy, op_in = self._transform_pt(26.0, 294.0, tier=4)
+        ix2, _, _ = self._transform_pt(454.0, 294.0, tier=4)
+        in_h = 32.0
 
-        if y2_wrap >= 280.0:
-            pts_in = _rounded_rect_points(input_x1, input_y, input_x2, input_y + input_h, r=16.0)
+        if iy + 8.0 <= y2_wrap and op_in > 0.05:
+            pts_in = _rounded_rect_points(ix1, iy, ix2, iy + in_h, r=16.0)
             self.canvas.coords(self.item_input_box, pts_in)
             self.canvas.itemconfig(self.item_input_box, fill="#141926", outline="#334155", state="normal")
 
-            entry_w = max(40, int(input_w - 76.0))
-            self.input_frame.place(x=int(input_x1 + 14.0), y=int(input_y + 4.0), width=entry_w, height=int(input_h - 8.0))
+            avail_in_h = max(0.0, min(in_h - 8.0, y2_wrap - iy - 4.0))
+            if avail_in_h >= 16.0:
+                entry_w = max(40, int(ix2 - ix1 - 76.0))
+                self.input_frame.place(x=int(ix1 + 14.0), y=int(iy + 4.0), width=entry_w, height=int(avail_in_h))
+                self.input_frame.lift()
+            else:
+                self.input_frame.place_forget()
 
             # Mic button with tap scale
             mic_scale = 0.88 if getattr(self, "_btn_mic_pressed", False) else 1.0
             r_mic = 11.0 * mic_scale
-            mic_cx = input_x2 - 46.0
-            mic_cy = input_y + input_h / 2.0
+            mic_cx = ix2 - 46.0
+            mic_cy = iy + in_h / 2.0
             self._btn_mic_cx = mic_cx
             self._btn_mic_cy = mic_cy
             self.canvas.coords(self.item_btn_mic_bg, mic_cx - r_mic, mic_cy - r_mic, mic_cx + r_mic, mic_cy + r_mic)
@@ -2177,8 +2267,8 @@ class JarvisIslandWidget:
             # Send button with tap scale
             send_scale = 0.88 if getattr(self, "_btn_send_pressed", False) else 1.0
             r_send = 11.0 * send_scale
-            send_cx = input_x2 - 18.0
-            send_cy = input_y + input_h / 2.0
+            send_cx = ix2 - 18.0
+            send_cy = iy + in_h / 2.0
             self._btn_send_cx = send_cx
             self._btn_send_cy = send_cy
             self.canvas.coords(self.item_btn_send_bg, send_cx - r_send, send_cy - r_send, send_cx + r_send, send_cy + r_send)
@@ -2195,13 +2285,9 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_btn_send_bg, state="hidden")
             self.canvas.itemconfig(self.item_btn_send, state="hidden")
 
-        # Middle Response Bubble & Action Chips
-        bubble_x1 = card_lx1 + 16.0
-        bubble_y1 = card_ly1 + 48.0
-        bubble_x2 = card_lx2 - 16.0
-        bubble_y2 = input_y - 8.0
-
-        if y2_wrap >= 210.0 and has_approval and left_w >= 140:
+        # Tier 4: Interactive Approval Chips
+        cx_chip, cy_chip, op_t4 = self._transform_pt(240.0, 260.0, tier=4)
+        if has_approval and cy_chip <= y2_wrap and op_t4 > 0.05:
             if getattr(self.asst, "pending_url", None):
                 raw_lbl = getattr(self.asst, "pending_label", "") or "Google"
                 clean_lbl = raw_lbl if len(raw_lbl) <= 15 else f"{raw_lbl[:13]}.."
@@ -2222,14 +2308,12 @@ class JarvisIslandWidget:
             gap_chip = 12.0
 
             total_chips_w = app_w + gap_chip + den_w
-            cx_card = (bubble_x1 + bubble_x2) / 2.0
-            x1_app = max(bubble_x1 + 6.0, cx_card - total_chips_w / 2.0)
+            x1_app = cx_chip - total_chips_w / 2.0
             x2_app = x1_app + app_w
             x1_den = x2_app + gap_chip
             x2_den = x1_den + den_w
 
-            chip_y = bubble_y2 - chip_h - 4.0
-            avail_h = max(20.0, chip_y - bubble_y1 - 8.0)
+            chip_y = cy_chip - chip_h / 2.0
 
             self.chip_approve_bbox = (int(x1_app), int(chip_y), int(x2_app), int(chip_y + chip_h))
             self.chip_deny_bbox = (int(x1_den), int(chip_y), int(x2_den), int(chip_y + chip_h))
@@ -2258,50 +2342,55 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_chip_deny_text, state="hidden")
             self.chip_approve_bbox = None
             self.chip_deny_bbox = None
-            avail_h = max(20.0, bubble_y2 - bubble_y1 - 10.0)
 
-        if y2_wrap >= 140.0:
+        # Tier 3: Middle Response Bubble & Frame
+        bx1, by1, op_t3 = self._transform_pt(26.0, 108.0, tier=3)
+        bx2, _, _ = self._transform_pt(454.0, 108.0, tier=3)
+        avail_h = max(0.0, min(140.0, y2_wrap - by1 - 6.0))
+
+        if avail_h > 15.0 and op_t3 > 0.05:
             reply_val = self.last_reply or "Operating at peak efficiency. All telemetry parameters are nominal. Would you like me to pull up your daily digest or verify your scheduled tasks?"
             clean = str(reply_val).replace("\x00", "").replace("\r", " ").strip()
             self._set_reply_content(clean)
-            self.reply_frame.place(x=int(bubble_x1 + 6.0), y=int(bubble_y1 + 6.0), width=int(bubble_x2 - bubble_x1 - 12.0), height=int(avail_h))
+            self.reply_frame.place(x=int(bx1 + 6.0), y=int(by1 + 6.0), width=int(bx2 - bx1 - 12.0), height=int(avail_h))
+            self.reply_frame.lift()
         else:
             self.reply_frame.place_forget()
         self.canvas.itemconfig(self.item_reply_text, state="hidden")
 
         # --- RIGHT CARD 1: IOS LOCKSCREEN CLOCK CARD ---
-        rx1 = right_x
-        ry1 = card_ly1
-        ry2 = ry1 + rc_h
-
-        if y2_wrap >= 90.0:
-            self.canvas.coords(self.item_clock_hdr, rx1 + 16.0, ry1 + 14.0)
+        # Tier 1: Clock Header, Volume, Window Controls, Time
+        clk_x, clk_y, op_clk = self._transform_pt(496.0, 74.0, tier=1)
+        if clk_y <= y2_wrap and op_clk > 0.02:
+            self.canvas.coords(self.item_clock_hdr, clk_x, clk_y)
             self.canvas.itemconfig(self.item_clock_hdr, state="normal")
 
             # High-DPI Vector Volume icon
+            vol_x, vol_y, _ = self._transform_pt(720.0, 74.0, tier=1)
             vol_icon = self.icon_mgr.get_icon("volume", size=14, color="#64748b")
-            self.canvas.coords(self.item_clock_icon, rx2 - 50.0, ry1 + 14.0)
+            self.canvas.coords(self.item_clock_icon, vol_x, vol_y)
             self.canvas.itemconfig(self.item_clock_icon, image=vol_icon, state="normal")
 
             # Window control vector icons (Minus & X) with tap scale
+            min_x, min_y, _ = self._transform_pt(738.0, 74.0, tier=1)
+            self._btn_min_x = min_x
+            self._btn_min_y = min_y
             min_scale = 0.88 if getattr(self, "_btn_min_pressed", False) else 1.0
-            self._btn_min_x = rx2 - 32.0
-            self._btn_min_y = ry1 + 14.0
             min_icon = self.icon_mgr.get_icon("min", size=14, color="#94a3b8", scale_factor=min_scale)
-            self.canvas.coords(self.item_btn_min, self._btn_min_x, self._btn_min_y)
+            self.canvas.coords(self.item_btn_min, min_x, min_y)
             self.canvas.itemconfig(self.item_btn_min, image=min_icon, state="normal")
 
+            cls_x, cls_y, _ = self._transform_pt(754.0, 74.0, tier=1)
+            self._btn_close_x = cls_x
+            self._btn_close_y = cls_y
             close_scale = 0.88 if getattr(self, "_btn_close_pressed", False) else 1.0
-            self._btn_close_x = rx2 - 16.0
-            self._btn_close_y = ry1 + 14.0
             close_icon = self.icon_mgr.get_icon("close", size=14, color="#94a3b8", scale_factor=close_scale)
-            self.canvas.coords(self.item_btn_close, self._btn_close_x, self._btn_close_y)
+            self.canvas.coords(self.item_btn_close, cls_x, cls_y)
             self.canvas.itemconfig(self.item_btn_close, image=close_icon, state="normal")
 
             now_dt = datetime.datetime.now()
             hh_str = now_dt.strftime("%H")
             mm_str = now_dt.strftime("%M")
-            date_str = now_dt.strftime("%A, %d %b")
 
             colon_val = int(140 + 115 * math.sin(self._anim_phase * 2.8))
             colon_fill = f"#{colon_val:02x}{colon_val:02x}{colon_val:02x}"
@@ -2309,13 +2398,14 @@ class JarvisIslandWidget:
             hh_w = self.font_clock.measure(hh_str)
             colon_w = self.font_clock.measure(":")
 
-            self.canvas.coords(self.item_clock_time, rx1 + 16.0, ry1 + 32.0)
+            tm_x, tm_y, _ = self._transform_pt(496.0, 92.0, tier=1)
+            self.canvas.coords(self.item_clock_time, tm_x, tm_y)
             self.canvas.itemconfig(self.item_clock_time, text=hh_str, fill="#ffffff", state="normal")
 
-            self.canvas.coords(self.item_clock_colon, rx1 + 16.0 + hh_w, ry1 + 32.0)
+            self.canvas.coords(self.item_clock_colon, tm_x + hh_w, tm_y)
             self.canvas.itemconfig(self.item_clock_colon, text=":", fill=colon_fill, state="normal")
 
-            self.canvas.coords(self.item_clock_mm, rx1 + 16.0 + hh_w + colon_w, ry1 + 32.0)
+            self.canvas.coords(self.item_clock_mm, tm_x + hh_w + colon_w, tm_y)
             self.canvas.itemconfig(self.item_clock_mm, text=mm_str, fill="#ffffff", state="normal")
         else:
             self.canvas.itemconfig(self.item_clock_hdr, state="hidden")
@@ -2326,13 +2416,17 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_clock_colon, state="hidden")
             self.canvas.itemconfig(self.item_clock_mm, state="hidden")
 
-        if y2_wrap >= 150.0:
+        # Tier 2: Date, Divider, Footer
+        dt_x, dt_y, op_dt = self._transform_pt(496.0, 128.0, tier=2)
+        if dt_y <= y2_wrap and op_dt > 0.02:
             now_dt = datetime.datetime.now()
             date_str = now_dt.strftime("%A, %d %b")
-            self.canvas.coords(self.item_clock_date, rx1 + 16.0, ry1 + 68.0)
+            self.canvas.coords(self.item_clock_date, dt_x, dt_y)
             self.canvas.itemconfig(self.item_clock_date, text=date_str, fill="#94a3b8", state="normal")
 
-            self.canvas.coords(self.item_clock_div, rx1 + 16.0, ry1 + 94.0, rx2 - 16.0, ry1 + 94.0)
+            dv_x1, dv_y, _ = self._transform_pt(496.0, 154.0, tier=2)
+            dv_x2, _, _ = self._transform_pt(754.0, 154.0, tier=2)
+            self.canvas.coords(self.item_clock_div, dv_x1, dv_y, dv_x2, dv_y)
             self.canvas.itemconfig(self.item_clock_div, fill="#1e293b", state="normal")
 
             has_media = bool(getattr(self, "media_state", None) and self.media_state.is_active)
@@ -2343,7 +2437,8 @@ class JarvisIslandWidget:
                 footer_txt = "● System Time Synced"
                 footer_clr = "#22d3ee"
 
-            self.canvas.coords(self.item_clock_footer, rx1 + 16.0, ry1 + 104.0)
+            ft_x, ft_y, _ = self._transform_pt(496.0, 164.0, tier=2)
+            self.canvas.coords(self.item_clock_footer, ft_x, ft_y)
             self.canvas.itemconfig(self.item_clock_footer, text=footer_txt, fill=footer_clr, state="normal")
         else:
             self.canvas.itemconfig(self.item_clock_date, state="hidden")
@@ -2351,17 +2446,14 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_clock_footer, state="hidden")
 
         # --- RIGHT CARD 2: BATTERY & TELEMETRY CARD ---
-        rx2_1 = right_x
-        ry2_1 = ry2 + gap
-        rx2_2 = rx2
-        ry2_2 = ry2_1 + rc_h
-
-        if y2_wrap >= 220.0:
+        # Tier 2: Battery Badge, Icon, Text, Tag
+        bt_x, bt_y, op_bt = self._transform_pt(496.0, 219.0, tier=2)
+        if bt_y <= y2_wrap and op_bt > 0.02:
             bat_str = self.telemetry.get("bat", "44% Charging")
             is_charging = "Charging" in bat_str or "Plugged" in bat_str
 
-            bx1 = rx2_1 + 16.0
-            by1 = ry2_1 + 14.0
+            bx1 = bt_x
+            by1 = bt_y
             bx2 = bx1 + 24.0
             by2 = by1 + 24.0
             pts_bg = _rounded_rect_points(bx1, by1, bx2, by2, r=6.0)
@@ -2377,7 +2469,8 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_sys_bat, text=bat_str, fill="#f8fafc", state="normal")
 
             tag_txt = "FAST" if is_charging else "AC"
-            self.canvas.coords(self.item_bat_tag, rx2_2 - 16.0, by1 + 12.0)
+            tag_x, tag_y, _ = self._transform_pt(754.0, 231.0, tier=2)
+            self.canvas.coords(self.item_bat_tag, tag_x, tag_y)
             self.canvas.itemconfig(self.item_bat_tag, text=tag_txt, fill="#34d399", state="normal")
         else:
             self.canvas.itemconfig(self.item_bat_badge, state="hidden")
@@ -2385,39 +2478,40 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_sys_bat, state="hidden")
             self.canvas.itemconfig(self.item_bat_tag, state="hidden")
 
-        if y2_wrap >= 280.0:
-            bar_x = rx2_1 + 78.0
-            bar_w = max(30.0, rx2_2 - bar_x - 16.0)
+        # Tier 3: Hardware Meters (CPU & RAM)
+        cp_x, cp_y, op_cp = self._transform_pt(496.0, 259.0, tier=3)
+        if cp_y <= y2_wrap and op_cp > 0.02:
+            bar_x = cp_x + 62.0
+            bar_w = max(30.0, 754.0 - 496.0 - 62.0)
 
             cpu_val = max(0.0, min(100.0, self._cur_cpu_pct))
             cpu_fill_w = max(3.0, (cpu_val / 100.0) * bar_w)
             cpu_color = "#f43f5e" if cpu_val > 85.0 else ("#f59e0b" if cpu_val > 70.0 else "#38bdf8")
-            y_cpu = ry2_1 + 54.0
 
-            self.canvas.coords(self.item_cpu_lbl, rx2_1 + 16.0, y_cpu - 6.0)
+            self.canvas.coords(self.item_cpu_lbl, cp_x, cp_y - 6.0)
             self.canvas.itemconfig(self.item_cpu_lbl, text=f"CPU {cpu_val:.0f}%", fill="#94a3b8", state="normal")
 
-            pts_cpu_tr = _rounded_rect_points(bar_x, y_cpu - 2.0, bar_x + bar_w, y_cpu + 2.0, r=2.0)
+            pts_cpu_tr = _rounded_rect_points(bar_x, cp_y - 2.0, bar_x + bar_w, cp_y + 2.0, r=2.0)
             self.canvas.coords(self.item_cpu_track, pts_cpu_tr)
             self.canvas.itemconfig(self.item_cpu_track, fill="#1e2433", state="normal")
 
-            pts_cpu_fl = _rounded_rect_points(bar_x, y_cpu - 2.0, bar_x + cpu_fill_w, y_cpu + 2.0, r=2.0)
+            pts_cpu_fl = _rounded_rect_points(bar_x, cp_y - 2.0, bar_x + cpu_fill_w, cp_y + 2.0, r=2.0)
             self.canvas.coords(self.item_cpu_fill, pts_cpu_fl)
             self.canvas.itemconfig(self.item_cpu_fill, fill=cpu_color, state="normal")
 
+            rm_x, rm_y, _ = self._transform_pt(496.0, 289.0, tier=3)
             ram_val = max(0.0, min(100.0, self._cur_ram_pct))
             ram_fill_w = max(3.0, (ram_val / 100.0) * bar_w)
             ram_color = "#f43f5e" if ram_val > 85.0 else ("#f59e0b" if ram_val > 75.0 else "#f59e0b")
-            y_ram = ry2_1 + 84.0
 
-            self.canvas.coords(self.item_ram_lbl, rx2_1 + 16.0, y_ram - 6.0)
+            self.canvas.coords(self.item_ram_lbl, rm_x, rm_y - 6.0)
             self.canvas.itemconfig(self.item_ram_lbl, text=f"RAM {ram_val:.0f}%", fill="#94a3b8", state="normal")
 
-            pts_ram_tr = _rounded_rect_points(bar_x, y_ram - 2.0, bar_x + bar_w, y_ram + 2.0, r=2.0)
+            pts_ram_tr = _rounded_rect_points(bar_x, rm_y - 2.0, bar_x + bar_w, rm_y + 2.0, r=2.0)
             self.canvas.coords(self.item_ram_track, pts_ram_tr)
             self.canvas.itemconfig(self.item_ram_track, fill="#1e2433", state="normal")
 
-            pts_ram_fl = _rounded_rect_points(bar_x, y_ram - 2.0, bar_x + ram_fill_w, y_ram + 2.0, r=2.0)
+            pts_ram_fl = _rounded_rect_points(bar_x, rm_y - 2.0, bar_x + ram_fill_w, rm_y + 2.0, r=2.0)
             self.canvas.coords(self.item_ram_fill, pts_ram_fl)
             self.canvas.itemconfig(self.item_ram_fill, fill=ram_color, state="normal")
         else:
