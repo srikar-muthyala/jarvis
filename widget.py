@@ -526,6 +526,150 @@ def _rounded_rect_points(x1: float, y1: float, x2: float, y2: float, r: float = 
     ]
 
 
+def make_ios_spring(stiffness: float = 380.0, damping: float = 32.0, mass: float = 0.8):
+    """Exact analytic closed-form damped harmonic oscillator for native iOS spring physics."""
+    w0 = math.sqrt(stiffness / mass)           # ~21.794
+    gamma = damping / (2.0 * mass)             # 20.0
+    wd = math.sqrt(w0**2 - gamma**2)           # ~8.660
+    def solve(t_norm: float) -> float:
+        t = t_norm * 0.36
+        if t <= 0.0:
+            return 0.0
+        if t >= 0.36:
+            return 1.0
+        val = 1.0 - math.exp(-gamma * t) * (math.cos(wd * t) + (gamma / wd) * math.sin(wd * t))
+        return max(0.0, min(1.02, val))
+    return solve
+
+
+IOS_SPRING = make_ios_spring(380.0, 32.0, 0.8)
+
+
+class IconManager:
+    """High-DPI Vector Icon Manager with subpixel antialiasing, vector stroke scaling, and PhotoImage cache."""
+    def __init__(self, ss: int = 4):
+        self.ss = ss
+        self._cache: dict[tuple, ImageTk.PhotoImage] = {}
+        self._pil_cache: dict[tuple, Image.Image] = {}
+
+    def get_icon(self, name: str, size: int = 18, color: str = "#94a3b8", angle: float = 0.0, scale_factor: float = 1.0) -> ImageTk.PhotoImage:
+        key = (name, size, color, round(angle, 1), round(scale_factor, 2))
+        if key in self._cache:
+            return self._cache[key]
+        pil_img = self.get_pil_icon(name, size, color, angle, scale_factor)
+        photo = ImageTk.PhotoImage(pil_img)
+        self._cache[key] = photo
+        return photo
+
+    def get_pil_icon(self, name: str, size: int = 18, color: str = "#94a3b8", angle: float = 0.0, scale_factor: float = 1.0) -> Image.Image:
+        key = (name, size, color, round(angle, 1), round(scale_factor, 2))
+        if key in self._pil_cache:
+            return self._pil_cache[key]
+
+        s = size * self.ss
+        img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
+        d = ImageDraw.Draw(img)
+        stroke_w = max(2, int(self.ss * 1.6 * scale_factor))
+        cx, cy = s / 2.0, s / 2.0
+        r_cap = stroke_w / 2.0
+
+        def draw_round_line(x1, y1, x2, y2, c=color, w=stroke_w):
+            d.line([(x1, y1), (x2, y2)], fill=c, width=w)
+            d.ellipse([x1 - r_cap, y1 - r_cap, x1 + r_cap, y1 + r_cap], fill=c)
+            d.ellipse([x2 - r_cap, y2 - r_cap, x2 + r_cap, y2 + r_cap], fill=c)
+
+        if name == "chevron":
+            # Lucide ChevronDown: M6 9l6 6 6-6 rotated by angle
+            pts = [(-0.25, -0.12), (0.0, 0.12), (0.25, -0.12)]
+            rad = math.radians(angle)
+            cos_a, sin_a = math.cos(rad), math.sin(rad)
+            rot_pts = []
+            for px, py in pts:
+                rx = px * scale_factor
+                ry = py * scale_factor
+                rot_x = rx * cos_a - ry * sin_a
+                rot_y = rx * sin_a + ry * cos_a
+                rot_pts.append((cx + rot_x * s, cy + rot_y * s))
+            draw_round_line(rot_pts[0][0], rot_pts[0][1], rot_pts[1][0], rot_pts[1][1])
+            draw_round_line(rot_pts[1][0], rot_pts[1][1], rot_pts[2][0], rot_pts[2][1])
+
+        elif name == "mic":
+            # Lucide Mic
+            bw = s * 0.15 * scale_factor
+            bh = s * 0.28 * scale_factor
+            mcy = cy - s * 0.08
+            d.rounded_rectangle([cx - bw, mcy - bh, cx + bw, mcy + bh], radius=int(bw), fill=color)
+            cw = s * 0.28 * scale_factor
+            ch = s * 0.24 * scale_factor
+            c_top = mcy - s * 0.02
+            d.arc([cx - cw, c_top, cx + cw, c_top + ch * 2], start=0, end=180, fill=color, width=stroke_w)
+            sy1 = c_top + ch * 2
+            sy2 = sy1 + s * 0.15 * scale_factor
+            draw_round_line(cx, sy1, cx, sy2)
+            draw_round_line(cx - s * 0.18 * scale_factor, sy2, cx + s * 0.18 * scale_factor, sy2)
+
+        elif name == "send":
+            # Lucide Send
+            scale_p = scale_factor * s
+            tip = (cx + 0.28 * scale_p, cy - 0.28 * scale_p)
+            left = (cx - 0.28 * scale_p, cy - 0.06 * scale_p)
+            bottom = (cx - 0.06 * scale_p, cy + 0.28 * scale_p)
+            fold = (cx - 0.05 * scale_p, cy - 0.05 * scale_p)
+            d.polygon([tip, left, fold, bottom], fill=color)
+
+        elif name == "close":
+            # Lucide X
+            span = s * 0.22 * scale_factor
+            draw_round_line(cx - span, cy - span, cx + span, cy + span)
+            draw_round_line(cx - span, cy + span, cx + span, cy - span)
+
+        elif name == "min":
+            # Lucide Minus
+            span = s * 0.25 * scale_factor
+            draw_round_line(cx - span, cy, cx + span, cy)
+
+        elif name == "volume":
+            # Lucide Volume2
+            scale_p = scale_factor * s
+            cone = [
+                (cx - 0.32 * scale_p, cy - 0.12 * scale_p),
+                (cx - 0.18 * scale_p, cy - 0.12 * scale_p),
+                (cx - 0.04 * scale_p, cy - 0.26 * scale_p),
+                (cx - 0.04 * scale_p, cy + 0.26 * scale_p),
+                (cx - 0.18 * scale_p, cy + 0.12 * scale_p),
+                (cx - 0.32 * scale_p, cy + 0.12 * scale_p),
+            ]
+            d.polygon(cone, fill=color)
+            d.arc([cx - 0.15 * scale_p, cy - 0.18 * scale_p, cx + 0.15 * scale_p, cy + 0.18 * scale_p], start=305, end=55, fill=color, width=stroke_w)
+            d.arc([cx - 0.28 * scale_p, cy - 0.32 * scale_p, cx + 0.32 * scale_p, cy + 0.32 * scale_p], start=315, end=45, fill=color, width=stroke_w)
+
+        elif name == "zap":
+            # Lucide Zap (lightning bolt)
+            scale_p = scale_factor * s
+            bolt = [
+                (cx + 0.08 * scale_p, cy - 0.38 * scale_p),
+                (cx - 0.32 * scale_p, cy + 0.05 * scale_p),
+                (cx - 0.02 * scale_p, cy + 0.05 * scale_p),
+                (cx - 0.08 * scale_p, cy + 0.38 * scale_p),
+                (cx + 0.32 * scale_p, cy - 0.05 * scale_p),
+                (cx + 0.02 * scale_p, cy - 0.05 * scale_p),
+            ]
+            d.polygon(bolt, fill=color)
+
+        elif name == "check":
+            # Lucide Check
+            scale_p = scale_factor * s
+            p1 = (cx - 0.28 * scale_p, cy + 0.02 * scale_p)
+            p2 = (cx - 0.08 * scale_p, cy + 0.22 * scale_p)
+            p3 = (cx + 0.28 * scale_p, cy - 0.22 * scale_p)
+            draw_round_line(p1[0], p1[1], p2[0], p2[1])
+            draw_round_line(p2[0], p2[1], p3[0], p3[1])
+
+        out = img.resize((size, size), Image.Resampling.LANCZOS)
+        self._pil_cache[key] = out
+        return out
+
+
 class JarvisIslandWidget:
     """Dynamic Island UI for Jarvis."""
 
@@ -560,8 +704,16 @@ class JarvisIslandWidget:
         self.target_t = 0.0
         self._anim_start_t = 0.0
         self._anim_start_time = 0.0
-        self._anim_duration = 0.400
+        self._anim_duration = 0.360
         self._morph_animating = False
+
+        # High-DPI Vector Icon Manager & Haptic Tap Press States
+        self.icon_mgr = IconManager(ss=4)
+        self._btn_pill_pressed = False
+        self._btn_mic_pressed = False
+        self._btn_send_pressed = False
+        self._btn_min_pressed = False
+        self._btn_close_pressed = False
 
         # Euler Spring Physics Simulation (Signature organic Apple / Nixi bounce)
         self.vel_w = 0.0
@@ -760,7 +912,8 @@ class JarvisIslandWidget:
         self._init_canvas_items()
 
         # Event bindings
-        self.canvas.bind("<Button-1>", self._on_canvas_click)
+        self.canvas.bind("<ButtonPress-1>", self._on_canvas_press)
+        self.canvas.bind("<ButtonRelease-1>", self._on_canvas_release)
         self.canvas.bind("<Enter>", self._on_mouse_enter)
         self.canvas.bind("<Leave>", self._on_mouse_leave)
         self.canvas.bind("<Motion>", self._on_mouse_motion)
@@ -805,14 +958,14 @@ class JarvisIslandWidget:
         self.item_compact_title = self.canvas.create_text(0, 0, anchor="w", text="J.A.R.V.I.S.", font=self.font_compact_title, fill="#ffffff", state="hidden", tags="btn_notch")
         self.item_compact_status = self.canvas.create_text(0, 0, anchor="w", text="Ready", font=self.font_compact_status, fill="#94a3b8", state="hidden", tags="btn_notch")
         self.item_compact_div = self.canvas.create_line(0, 0, 0, 0, fill="#334155", state="hidden", tags="btn_notch")
-        self.item_compact_chevron = self.canvas.create_text(0, 0, text="⤢", font=("Segoe UI", 8), fill="#64748b", state="hidden", tags="btn_notch")
+        # Rotating Vector Chevron with circular haptic button background
+        self.item_compact_chevron_bg = self.canvas.create_oval(0, 0, 0, 0, fill="#1e2538", outline="#334155", width=1.0, state="hidden", tags="btn_notch")
+        self.item_compact_chevron = self.canvas.create_image(0, 0, state="hidden", tags="btn_notch")
         self.item_wave_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#22d3ee", state="hidden", tags="btn_notch")
         self.item_wave_bar2 = self.canvas.create_polygon(0, 0, 0, 0, fill="#818cf8", state="hidden", tags="btn_notch")
         self.item_wave_bar3 = self.canvas.create_polygon(0, 0, 0, 0, fill="#fb7185", state="hidden", tags="btn_notch")
         self.item_wave_bar4 = self.canvas.create_polygon(0, 0, 0, 0, fill="#22d3ee", state="hidden", tags="btn_notch")
         self.canvas.tag_bind("btn_notch", "<Button-1>", lambda e: (self.mascot.trigger_click_wobble(), self.toggle_expand()))
-        self.canvas.tag_bind("btn_min", "<Button-1>", lambda e: self.toggle_expand(False))
-        self.canvas.tag_bind("btn_close", "<Button-1>", lambda e: self.toggle_expand(False))
 
         # Waveform Equalizer Bars for Expanded Mode (Top-Right of AI Assistant Card)
         self.exp_wave_bar1 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
@@ -821,10 +974,12 @@ class JarvisIslandWidget:
         self.exp_wave_bar4 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
         self.exp_wave_bar5 = self.canvas.create_polygon(0, 0, 0, 0, fill="#10b981", state="hidden")
 
-        # 3. Top Header Bar (Expanded Mode)
+        # 3. Top Header Bar / Clock Card Window Control Buttons (Vector Minus & X)
         self.item_header_logo = self.canvas.create_text(18, 15, anchor="w", text="J.A.R.V.I.S.", font=("Segoe UI", 8, "bold"), fill="#94a3b8", state="hidden")
-        self.item_btn_min = self.canvas.create_text(0, 0, text="—", font=("Segoe UI", 9, "bold"), fill="#94a3b8", tags="btn_min", state="hidden")
-        self.item_btn_close = self.canvas.create_text(0, 0, text="✕", font=("Segoe UI", 8, "bold"), fill="#94a3b8", tags="btn_close", state="hidden")
+        self.item_btn_min = self.canvas.create_image(0, 0, tags="btn_min", state="hidden")
+        self.item_btn_close = self.canvas.create_image(0, 0, tags="btn_close", state="hidden")
+        self.canvas.tag_bind("btn_min", "<Button-1>", lambda e: self.toggle_expand(False))
+        self.canvas.tag_bind("btn_close", "<Button-1>", lambda e: self.toggle_expand(False))
 
         # 4. Left AI Assistant Card (React iOS Deck)
         self.item_agent_robo = self.canvas.create_image(0, 0, tags="btn_robo", state="hidden")
@@ -835,25 +990,25 @@ class JarvisIslandWidget:
         self.item_agent_badge_bg = self.canvas.create_polygon(0, 0, 0, 0, fill="#064e3b", outline="#059669", width=1.0, smooth=True, state="hidden")
         self.item_agent_badge = self.canvas.create_text(0, 0, text="Optimal", font=self.font_chip_bold, fill="#34d399", state="hidden")
 
-        # Input Box Outline & Icons
+        # Input Box Outline & Vector Icons (Mic & Send)
         self.item_input_box = self.canvas.create_polygon(0, 0, 0, 0, fill="#141926", outline="#333f5c", width=1.0, smooth=True, state="hidden")
         self.item_btn_send_bg = self.canvas.create_oval(0, 0, 0, 0, fill="#ffffff", outline="", tags="btn_send", state="hidden")
-        self.item_btn_send = self.canvas.create_text(0, 0, text="➤", font=("Segoe UI", 8, "bold"), fill="#000000", tags="btn_send", state="hidden")
+        self.item_btn_send = self.canvas.create_image(0, 0, tags="btn_send", state="hidden")
         self.item_btn_mic_bg = self.canvas.create_oval(0, 0, 0, 0, fill="#1e2538", outline="#334155", width=1.0, tags="btn_mic", state="hidden")
-        self.item_btn_mic = self.canvas.create_text(0, 0, text="🎙", font=("Segoe UI", 9), fill="#f8fafc", tags="btn_mic", state="hidden")
+        self.item_btn_mic = self.canvas.create_image(0, 0, tags="btn_mic", state="hidden")
 
         # Reply & Output Text
         self.item_reply_text = self.canvas.create_text(0, 0, anchor="nw", text="", font=("Segoe UI", 9), fill="#e2e8f0", state="hidden")
 
         # Interactive Action / Approval Chips (Yes / No)
         self.item_chip_approve_bg = self.canvas.create_polygon(0, 0, 0, 0, fill="#065f46", outline="#34d399", width=1.0, smooth=True, state="hidden", tags="chip_approve")
-        self.item_chip_approve_text = self.canvas.create_text(0, 0, text="✓ Yes", font=("Segoe UI", 8, "bold"), fill="#f8fafc", state="hidden", tags="chip_approve")
+        self.item_chip_approve_text = self.canvas.create_text(0, 0, text="✓ Optimize", font=("Segoe UI", 8, "bold"), fill="#f8fafc", state="hidden", tags="chip_approve")
         self.item_chip_deny_bg = self.canvas.create_polygon(0, 0, 0, 0, fill="#1e2433", outline="#475569", width=1.0, smooth=True, state="hidden", tags="chip_deny")
-        self.item_chip_deny_text = self.canvas.create_text(0, 0, text="✕ No", font=("Segoe UI", 8), fill="#94a3b8", state="hidden", tags="chip_deny")
+        self.item_chip_deny_text = self.canvas.create_text(0, 0, text="✕ Dismiss", font=("Segoe UI", 8), fill="#94a3b8", state="hidden", tags="chip_deny")
 
         # 5. Right Top Card: iOS Lockscreen-Style Clock Card
         self.item_clock_hdr = self.canvas.create_text(0, 0, anchor="nw", text="CLOCK", font=self.font_section_lbl, fill="#64748b", state="hidden")
-        self.item_clock_icon = self.canvas.create_text(0, 0, text="🔊", font=("Segoe UI", 8), fill="#64748b", state="hidden")
+        self.item_clock_icon = self.canvas.create_image(0, 0, state="hidden")
         self.item_clock_time = self.canvas.create_text(0, 0, anchor="nw", text="12", font=self.font_clock, fill="#ffffff", state="hidden")
         self.item_clock_colon = self.canvas.create_text(0, 0, anchor="nw", text=":", font=self.font_clock, fill="#ffffff", state="hidden")
         self.item_clock_mm = self.canvas.create_text(0, 0, anchor="nw", text="00", font=self.font_clock, fill="#ffffff", state="hidden")
@@ -864,7 +1019,7 @@ class JarvisIslandWidget:
         # 6. Right Bottom Card: iOS Battery & Hardware Telemetry Card
         self.item_bat_badge = self.canvas.create_polygon(0, 0, 0, 0, fill="#064e3b", outline="#059669", width=1.0, smooth=True, state="hidden")
         self.item_bolt_glow = self.canvas.create_polygon(0, 0, 0, 0, fill="#14532d", state="hidden")
-        self.item_bolt = self.canvas.create_polygon(0, 0, 0, 0, fill="#4ade80", state="hidden")
+        self.item_bolt = self.canvas.create_image(0, 0, state="hidden")
         self.item_sys_bat = self.canvas.create_text(0, 0, anchor="nw", text="Battery", font=("Segoe UI", 9, "bold"), fill="#f8fafc", state="hidden")
         self.item_bat_tag = self.canvas.create_text(0, 0, anchor="e", text="FAST", font=self.font_section_lbl, fill="#34d399", state="hidden")
 
@@ -938,11 +1093,30 @@ class JarvisIslandWidget:
     def _compose_bg_frame(self, t: float) -> Image.Image:
         out = Image.new("RGBA", (self.WIN_W, self.WIN_H), (1, 1, 1, 255))
         if t > 0.01 and getattr(self, "_deck_layer", None) is not None:
-            dy = int(-16.0 * (1.0 - t))
-            r, g, b, a = self._deck_layer.split()
-            a_mod = a.point(lambda p: int(p * t))
-            deck_mod = Image.merge("RGBA", (r, g, b, a_mod))
-            out.paste(deck_mod, (0, dy), deck_mod)
+            cx = self.WIN_W / 2.0
+            # Expanding squircle wrapper unrolling directly out of pill container
+            w_wrap = 220.0 + (760.0 - 220.0) * t
+            x1_wrap = cx - w_wrap / 2.0
+            x2_wrap = cx + w_wrap / 2.0
+            y1_wrap = 50.0
+            y2_wrap = 50.0 + (340.0 - 50.0) * t
+            r = min(28.0, w_wrap / 2.0, (y2_wrap - y1_wrap) / 2.0 if y2_wrap > y1_wrap else 0)
+
+            dy = int(-8.0 * (1.0 - t))
+            alpha = min(1.0, max(0.0, (t - 0.1) / 0.9))
+
+            r_c, g_c, b_c, a_c = self._deck_layer.split()
+            a_mod = a_c.point(lambda p: int(p * alpha))
+            deck_mod = Image.merge("RGBA", (r_c, g_c, b_c, a_mod))
+
+            mask = Image.new("L", (self.WIN_W, self.WIN_H), 0)
+            mdraw = ImageDraw.Draw(mask)
+            mdraw.rounded_rectangle([int(x1_wrap), int(y1_wrap), int(x2_wrap), int(y2_wrap)], radius=int(r), fill=255)
+
+            deck_shifted = Image.new("RGBA", (self.WIN_W, self.WIN_H), (0, 0, 0, 0))
+            deck_shifted.paste(deck_mod, (0, dy), deck_mod)
+            out.paste(deck_shifted, (0, 0), mask)
+
         if getattr(self, "_pill_layer", None) is not None:
             out.paste(self._pill_layer, (0, 0), self._pill_layer)
 
@@ -1622,11 +1796,11 @@ class JarvisIslandWidget:
             # Smooth response streaming reveal
             self._update_reply_stream()
 
-            # Dynamic Island Morph Continuous Animation Step
+            # Dynamic Island Morph Continuous Animation Step (Exact iOS Spring)
             if getattr(self, "_morph_animating", False):
                 elapsed = now - self._anim_start_time
                 progress = min(1.0, max(0.0, elapsed / self._anim_duration))
-                eased = EASE_MORPH(progress)
+                eased = IOS_SPRING(progress)
                 self.anim_t = self._anim_start_t + (self.target_t - self._anim_start_t) * eased
                 if progress >= 1.0:
                     self.anim_t = self.target_t
@@ -1738,11 +1912,13 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_compact_status, state="hidden")
             self.canvas.itemconfig(self.item_compact_div, state="hidden")
             self.canvas.itemconfig(self.item_compact_chevron, state="hidden")
+            self.canvas.itemconfig(self.item_compact_chevron_bg, state="hidden")
             self._hide_media_compact_items()
             self._hide_wave_items()
 
+            hud_mic_icon = self.icon_mgr.get_icon("mic", size=18, color="#ef4444" if self.hud_mic_muted else "#10b981")
             self.canvas.coords(self.item_hud_icon, pill_x + 24.0, cy)
-            self.canvas.itemconfig(self.item_hud_icon, text="🎙️", state="normal")
+            self.canvas.itemconfig(self.item_hud_icon, image=hud_mic_icon, state="normal")
 
             hud_txt = "MIC MUTED" if self.hud_mic_muted else "MIC ACTIVE"
             hud_color = "#ef4444" if self.hud_mic_muted else "#10b981"
@@ -1762,12 +1938,13 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_compact_status, state="hidden")
             self.canvas.itemconfig(self.item_compact_div, state="hidden")
             self.canvas.itemconfig(self.item_compact_chevron, state="hidden")
+            self.canvas.itemconfig(self.item_compact_chevron_bg, state="hidden")
             self._hide_media_compact_items()
             self._hide_wave_items()
 
-            vol_icon = "🔇" if self.hud_volume_muted else "🔊"
+            vol_icon = self.icon_mgr.get_icon("volume", size=18, color="#f5f5f5")
             self.canvas.coords(self.item_hud_icon, pill_x + 24.0, cy)
-            self.canvas.itemconfig(self.item_hud_icon, text=vol_icon, state="normal")
+            self.canvas.itemconfig(self.item_hud_icon, image=vol_icon, state="normal")
 
             self.canvas.coords(self.item_hud_text, pill_x + 44.0, cy)
             self.canvas.itemconfig(self.item_hud_text, text=f"{self.hud_volume_val}%", fill="#f5f5f5", state="normal")
@@ -1792,6 +1969,7 @@ class JarvisIslandWidget:
             self.canvas.itemconfig(self.item_compact_status, state="hidden")
             self.canvas.itemconfig(self.item_compact_div, state="hidden")
             self.canvas.itemconfig(self.item_compact_chevron, state="hidden")
+            self.canvas.itemconfig(self.item_compact_chevron_bg, state="hidden")
             self._hide_wave_items()
 
             cx_disc = pill_x + 24.0
@@ -1879,12 +2057,21 @@ class JarvisIslandWidget:
             self.canvas.coords(self.item_compact_status, div_x + 8.0, cy)
             self.canvas.itemconfig(self.item_compact_status, text=badge_txt, fill=status_clr, state="normal")
 
-            chevron_symbol = "⤡" if self.anim_t >= 0.5 else "⤢"
-            self.canvas.coords(self.item_compact_chevron, pill_x + 204.0, cy)
-            self.canvas.itemconfig(self.item_compact_chevron, text=chevron_symbol, fill="#64748b", state="normal")
+            # Animated Vector Chevron with smooth 180° rotation and press scale
+            scale_btn = 0.88 if getattr(self, "_btn_pill_pressed", False) else 1.0
+            r_btn = 12.0 * scale_btn
+            btn_cx = pill_x + 204.0
+            self.canvas.coords(self.item_compact_chevron_bg, btn_cx - r_btn, cy - r_btn, btn_cx + r_btn, cy + r_btn)
+            self.canvas.itemconfig(self.item_compact_chevron_bg, fill="#1e2538", outline="#334155", state="normal")
+
+            chevron_angle = 180.0 * self.anim_t
+            chevron_clr = "#38bdf8" if self.anim_t >= 0.5 else "#94a3b8"
+            chevron_img = self.icon_mgr.get_icon("chevron", size=14, color=chevron_clr, angle=chevron_angle, scale_factor=scale_btn)
+            self.canvas.coords(self.item_compact_chevron, btn_cx, cy)
+            self.canvas.itemconfig(self.item_compact_chevron, image=chevron_img, state="normal")
 
         # ----------------------------------------------------------------------
-        # 2. EXPANDED 3-CARD DECK (Glides in smoothly with dy: -16px -> 0px)
+        # 2. EXPANDED 3-CARD DECK (Unrolls directly out of pill container)
         # ----------------------------------------------------------------------
         if self.anim_t <= 0.01:
             self._hide_expanded_items()
@@ -1893,7 +2080,7 @@ class JarvisIslandWidget:
                 self.reply_frame.place_forget()
             return
 
-        dy = -16.0 * (1.0 - self.anim_t)
+        dy = -8.0 * (1.0 - self.anim_t)
         deck_y = 60.0 + dy
         deck_h = 280.0
         left_w = 460.0
@@ -1908,89 +2095,113 @@ class JarvisIslandWidget:
         rx2 = right_x + right_w       # 770.0
         rc_h = (deck_h - gap) // 2    # 135.0
 
+        y2_wrap = 50.0 + 290.0 * self.anim_t
+
         # --- LEFT CARD: ASSISTANT INTELLIGENCE DECK ---
-        robo_large = self.mascot.get_photo_image(size=30, mood=mood, phase=self._anim_phase)
-        self.canvas.coords(self.item_agent_robo, card_lx1 + 26.0, card_ly1 + 24.0)
-        self.canvas.itemconfig(self.item_agent_robo, image=robo_large, state="normal")
+        if y2_wrap >= 90.0:
+            robo_large = self.mascot.get_photo_image(size=30, mood=mood, phase=self._anim_phase)
+            self.canvas.coords(self.item_agent_robo, card_lx1 + 26.0, card_ly1 + 24.0)
+            self.canvas.itemconfig(self.item_agent_robo, image=robo_large, state="normal")
 
-        self.canvas.coords(self.item_agent_title, card_lx1 + 48.0, card_ly1 + 17.0)
-        self.canvas.itemconfig(self.item_agent_title, text="Assistant Intelligence", state="normal")
-        self.canvas.coords(self.item_agent_sub, card_lx1 + 48.0, card_ly1 + 31.0)
-        self.canvas.itemconfig(self.item_agent_sub, text="NEURAL LINK // ACTIVE", state="normal")
+            self.canvas.coords(self.item_agent_title, card_lx1 + 48.0, card_ly1 + 17.0)
+            self.canvas.itemconfig(self.item_agent_title, text="Assistant Intelligence", state="normal")
+            self.canvas.coords(self.item_agent_sub, card_lx1 + 48.0, card_ly1 + 31.0)
+            self.canvas.itemconfig(self.item_agent_sub, text="NEURAL LINK // ACTIVE", state="normal")
 
-        # Optimal / Status Pill Badge
-        badge_w = 58.0
-        badge_h = 20.0
-        bx2 = card_lx2 - 16.0
-        bx1 = bx2 - badge_w
-        by1 = card_ly1 + 14.0
-        by2 = by1 + badge_h
-        pts_badge = _rounded_rect_points(bx1, by1, bx2, by2, r=10.0)
-        self.canvas.coords(self.item_agent_badge_bg, pts_badge)
-        self.canvas.coords(self.item_agent_badge, (bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
+            # Optimal / Status Pill Badge
+            badge_w = 58.0
+            badge_h = 20.0
+            bx2 = card_lx2 - 16.0
+            bx1 = bx2 - badge_w
+            by1 = card_ly1 + 14.0
+            by2 = by1 + badge_h
+            pts_badge = _rounded_rect_points(bx1, by1, bx2, by2, r=10.0)
+            self.canvas.coords(self.item_agent_badge_bg, pts_badge)
+            self.canvas.coords(self.item_agent_badge, (bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
 
-        if self.is_listening:
-            badge_txt = "Listening"
-            b_fill, b_outline, t_fill = "#881337", "#f43f5e", "#fb7185"
-        elif self.is_thinking:
-            badge_txt = "Working"
-            b_fill, b_outline, t_fill = "#78350f", "#f59e0b", "#fbbf24"
-        elif self.is_speaking:
-            badge_txt = "Speaking"
-            b_fill, b_outline, t_fill = "#064e3b", "#10b981", "#34d399"
+            if self.is_listening:
+                badge_txt = "Listening"
+                b_fill, b_outline, t_fill = "#881337", "#f43f5e", "#fb7185"
+            elif self.is_thinking:
+                badge_txt = "Working"
+                b_fill, b_outline, t_fill = "#78350f", "#f59e0b", "#fbbf24"
+            elif self.is_speaking:
+                badge_txt = "Speaking"
+                b_fill, b_outline, t_fill = "#064e3b", "#10b981", "#34d399"
+            else:
+                badge_txt = "Optimal"
+                b_fill, b_outline, t_fill = "#064e3b", "#059669", "#34d399"
+
+            self.canvas.itemconfig(self.item_agent_badge_bg, fill=b_fill, outline=b_outline, state="normal")
+            self.canvas.itemconfig(self.item_agent_badge, text=badge_txt, fill=t_fill, state="normal")
         else:
-            badge_txt = "Optimal"
-            b_fill, b_outline, t_fill = "#064e3b", "#059669", "#34d399"
+            self.canvas.itemconfig(self.item_agent_robo, state="hidden")
+            self.canvas.itemconfig(self.item_agent_title, state="hidden")
+            self.canvas.itemconfig(self.item_agent_sub, state="hidden")
+            self.canvas.itemconfig(self.item_agent_badge_bg, state="hidden")
+            self.canvas.itemconfig(self.item_agent_badge, state="hidden")
 
-        self.canvas.itemconfig(self.item_agent_badge_bg, fill=b_fill, outline=b_outline, state="normal")
-        self.canvas.itemconfig(self.item_agent_badge, text=badge_txt, fill=t_fill, state="normal")
-
-        # Bottom Prompt Pill Bar (iOS Frosted Pill Bar)
+        # Bottom Prompt Pill Bar (iOS Frosted Pill Bar with High-DPI Vector Mic & Send Icons)
         input_y = card_ly2 - 46.0
         input_h = 32.0
         input_x1 = card_lx1 + 16.0
         input_x2 = card_lx2 - 16.0
         input_w = input_x2 - input_x1
-        pts_in = _rounded_rect_points(input_x1, input_y, input_x2, input_y + input_h, r=16.0)
-        self.canvas.coords(self.item_input_box, pts_in)
-        self.canvas.itemconfig(self.item_input_box, fill="#141926", outline="#334155", state="normal")
 
-        entry_w = max(40, int(input_w - 76.0))
-        if self.anim_t >= 0.6:
+        if y2_wrap >= 280.0:
+            pts_in = _rounded_rect_points(input_x1, input_y, input_x2, input_y + input_h, r=16.0)
+            self.canvas.coords(self.item_input_box, pts_in)
+            self.canvas.itemconfig(self.item_input_box, fill="#141926", outline="#334155", state="normal")
+
+            entry_w = max(40, int(input_w - 76.0))
             self.input_frame.place(x=int(input_x1 + 14.0), y=int(input_y + 4.0), width=entry_w, height=int(input_h - 8.0))
+
+            # Mic button with tap scale
+            mic_scale = 0.88 if getattr(self, "_btn_mic_pressed", False) else 1.0
+            r_mic = 11.0 * mic_scale
+            mic_cx = input_x2 - 46.0
+            mic_cy = input_y + input_h / 2.0
+            self._btn_mic_cx = mic_cx
+            self._btn_mic_cy = mic_cy
+            self.canvas.coords(self.item_btn_mic_bg, mic_cx - r_mic, mic_cy - r_mic, mic_cx + r_mic, mic_cy + r_mic)
+
+            mic_clr = "#fb7185" if self.is_listening else "#94a3b8"
+            mic_bg_fill = "#881337" if self.is_listening else "#1e2538"
+            mic_bg_outline = "#f43f5e" if self.is_listening else "#334155"
+            self.canvas.itemconfig(self.item_btn_mic_bg, fill=mic_bg_fill, outline=mic_bg_outline, state="normal")
+
+            mic_icon = self.icon_mgr.get_icon("mic", size=16, color=mic_clr, scale_factor=mic_scale)
+            self.canvas.coords(self.item_btn_mic, mic_cx, mic_cy)
+            self.canvas.itemconfig(self.item_btn_mic, image=mic_icon, state="normal")
+
+            # Send button with tap scale
+            send_scale = 0.88 if getattr(self, "_btn_send_pressed", False) else 1.0
+            r_send = 11.0 * send_scale
+            send_cx = input_x2 - 18.0
+            send_cy = input_y + input_h / 2.0
+            self._btn_send_cx = send_cx
+            self._btn_send_cy = send_cy
+            self.canvas.coords(self.item_btn_send_bg, send_cx - r_send, send_cy - r_send, send_cx + r_send, send_cy + r_send)
+            self.canvas.itemconfig(self.item_btn_send_bg, fill="#ffffff", outline="", state="normal")
+
+            send_icon = self.icon_mgr.get_icon("send", size=14, color="#000000", scale_factor=send_scale)
+            self.canvas.coords(self.item_btn_send, send_cx, send_cy)
+            self.canvas.itemconfig(self.item_btn_send, image=send_icon, state="normal")
         else:
             self.input_frame.place_forget()
+            self.canvas.itemconfig(self.item_input_box, state="hidden")
+            self.canvas.itemconfig(self.item_btn_mic_bg, state="hidden")
+            self.canvas.itemconfig(self.item_btn_mic, state="hidden")
+            self.canvas.itemconfig(self.item_btn_send_bg, state="hidden")
+            self.canvas.itemconfig(self.item_btn_send, state="hidden")
 
-        mic_cx = input_x2 - 46.0
-        mic_cy = input_y + input_h / 2.0
-        r_btn = 11.0
-        self._btn_mic_cx = mic_cx
-        self._btn_mic_cy = mic_cy
-        self.canvas.coords(self.item_btn_mic_bg, mic_cx - r_btn, mic_cy - r_btn, mic_cx + r_btn, mic_cy + r_btn)
-        self.canvas.coords(self.item_btn_mic, mic_cx, mic_cy)
-        if self.is_listening:
-            self.canvas.itemconfig(self.item_btn_mic_bg, fill="#881337", outline="#f43f5e", state="normal")
-            self.canvas.itemconfig(self.item_btn_mic, fill="#fb7185", state="normal")
-        else:
-            self.canvas.itemconfig(self.item_btn_mic_bg, fill="#1e2538", outline="#334155", state="normal")
-            self.canvas.itemconfig(self.item_btn_mic, fill="#94a3b8", state="normal")
-
-        send_cx = input_x2 - 18.0
-        send_cy = input_y + input_h / 2.0
-        self._btn_send_cx = send_cx
-        self._btn_send_cy = send_cy
-        self.canvas.coords(self.item_btn_send_bg, send_cx - r_btn, send_cy - r_btn, send_cx + r_btn, send_cy + r_btn)
-        self.canvas.coords(self.item_btn_send, send_cx, send_cy)
-        self.canvas.itemconfig(self.item_btn_send_bg, fill="#ffffff", outline="", state="normal")
-        self.canvas.itemconfig(self.item_btn_send, text="➤", fill="#000000", state="normal")
-
-        # Response Bubble & Action Chips
+        # Middle Response Bubble & Action Chips
         bubble_x1 = card_lx1 + 16.0
         bubble_y1 = card_ly1 + 48.0
         bubble_x2 = card_lx2 - 16.0
         bubble_y2 = input_y - 8.0
 
-        if has_approval and left_w >= 140:
+        if y2_wrap >= 210.0 and has_approval and left_w >= 140:
             if getattr(self.asst, "pending_url", None):
                 raw_lbl = getattr(self.asst, "pending_label", "") or "Google"
                 clean_lbl = raw_lbl if len(raw_lbl) <= 15 else f"{raw_lbl[:13]}.."
@@ -2049,10 +2260,10 @@ class JarvisIslandWidget:
             self.chip_deny_bbox = None
             avail_h = max(20.0, bubble_y2 - bubble_y1 - 10.0)
 
-        reply_val = self.last_reply or "Operating at peak efficiency. All telemetry parameters are nominal. Would you like me to pull up your daily digest or verify your scheduled tasks?"
-        clean = str(reply_val).replace("\x00", "").replace("\r", " ").strip()
-        self._set_reply_content(clean)
-        if self.anim_t >= 0.6:
+        if y2_wrap >= 140.0:
+            reply_val = self.last_reply or "Operating at peak efficiency. All telemetry parameters are nominal. Would you like me to pull up your daily digest or verify your scheduled tasks?"
+            clean = str(reply_val).replace("\x00", "").replace("\r", " ").strip()
+            self._set_reply_content(clean)
             self.reply_frame.place(x=int(bubble_x1 + 6.0), y=int(bubble_y1 + 6.0), width=int(bubble_x2 - bubble_x1 - 12.0), height=int(avail_h))
         else:
             self.reply_frame.place_forget()
@@ -2063,54 +2274,81 @@ class JarvisIslandWidget:
         ry1 = card_ly1
         ry2 = ry1 + rc_h
 
-        self.canvas.coords(self.item_clock_hdr, rx1 + 16.0, ry1 + 14.0)
-        self.canvas.itemconfig(self.item_clock_hdr, state="normal")
+        if y2_wrap >= 90.0:
+            self.canvas.coords(self.item_clock_hdr, rx1 + 16.0, ry1 + 14.0)
+            self.canvas.itemconfig(self.item_clock_hdr, state="normal")
 
-        self.canvas.coords(self.item_clock_icon, rx2 - 50.0, ry1 + 14.0)
-        self.canvas.itemconfig(self.item_clock_icon, text="🔊", state="normal")
+            # High-DPI Vector Volume icon
+            vol_icon = self.icon_mgr.get_icon("volume", size=14, color="#64748b")
+            self.canvas.coords(self.item_clock_icon, rx2 - 50.0, ry1 + 14.0)
+            self.canvas.itemconfig(self.item_clock_icon, image=vol_icon, state="normal")
 
-        self.canvas.coords(self.item_btn_min, rx2 - 32.0, ry1 + 14.0)
-        self.canvas.itemconfig(self.item_btn_min, text="—", state="normal")
+            # Window control vector icons (Minus & X) with tap scale
+            min_scale = 0.88 if getattr(self, "_btn_min_pressed", False) else 1.0
+            self._btn_min_x = rx2 - 32.0
+            self._btn_min_y = ry1 + 14.0
+            min_icon = self.icon_mgr.get_icon("min", size=14, color="#94a3b8", scale_factor=min_scale)
+            self.canvas.coords(self.item_btn_min, self._btn_min_x, self._btn_min_y)
+            self.canvas.itemconfig(self.item_btn_min, image=min_icon, state="normal")
 
-        self.canvas.coords(self.item_btn_close, rx2 - 16.0, ry1 + 14.0)
-        self.canvas.itemconfig(self.item_btn_close, text="✕", state="normal")
+            close_scale = 0.88 if getattr(self, "_btn_close_pressed", False) else 1.0
+            self._btn_close_x = rx2 - 16.0
+            self._btn_close_y = ry1 + 14.0
+            close_icon = self.icon_mgr.get_icon("close", size=14, color="#94a3b8", scale_factor=close_scale)
+            self.canvas.coords(self.item_btn_close, self._btn_close_x, self._btn_close_y)
+            self.canvas.itemconfig(self.item_btn_close, image=close_icon, state="normal")
 
-        now_dt = datetime.datetime.now()
-        hh_str = now_dt.strftime("%H")
-        mm_str = now_dt.strftime("%M")
-        date_str = now_dt.strftime("%A, %d %b")
+            now_dt = datetime.datetime.now()
+            hh_str = now_dt.strftime("%H")
+            mm_str = now_dt.strftime("%M")
+            date_str = now_dt.strftime("%A, %d %b")
 
-        colon_val = int(140 + 115 * math.sin(self._anim_phase * 2.8))
-        colon_fill = f"#{colon_val:02x}{colon_val:02x}{colon_val:02x}"
+            colon_val = int(140 + 115 * math.sin(self._anim_phase * 2.8))
+            colon_fill = f"#{colon_val:02x}{colon_val:02x}{colon_val:02x}"
 
-        hh_w = self.font_clock.measure(hh_str)
-        colon_w = self.font_clock.measure(":")
+            hh_w = self.font_clock.measure(hh_str)
+            colon_w = self.font_clock.measure(":")
 
-        self.canvas.coords(self.item_clock_time, rx1 + 16.0, ry1 + 32.0)
-        self.canvas.itemconfig(self.item_clock_time, text=hh_str, fill="#ffffff", state="normal")
+            self.canvas.coords(self.item_clock_time, rx1 + 16.0, ry1 + 32.0)
+            self.canvas.itemconfig(self.item_clock_time, text=hh_str, fill="#ffffff", state="normal")
 
-        self.canvas.coords(self.item_clock_colon, rx1 + 16.0 + hh_w, ry1 + 32.0)
-        self.canvas.itemconfig(self.item_clock_colon, text=":", fill=colon_fill, state="normal")
+            self.canvas.coords(self.item_clock_colon, rx1 + 16.0 + hh_w, ry1 + 32.0)
+            self.canvas.itemconfig(self.item_clock_colon, text=":", fill=colon_fill, state="normal")
 
-        self.canvas.coords(self.item_clock_mm, rx1 + 16.0 + hh_w + colon_w, ry1 + 32.0)
-        self.canvas.itemconfig(self.item_clock_mm, text=mm_str, fill="#ffffff", state="normal")
-
-        self.canvas.coords(self.item_clock_date, rx1 + 16.0, ry1 + 68.0)
-        self.canvas.itemconfig(self.item_clock_date, text=date_str, fill="#94a3b8", state="normal")
-
-        self.canvas.coords(self.item_clock_div, rx1 + 16.0, ry1 + 94.0, rx2 - 16.0, ry1 + 94.0)
-        self.canvas.itemconfig(self.item_clock_div, fill="#1e293b", state="normal")
-
-        has_media = bool(getattr(self, "media_state", None) and self.media_state.is_active)
-        if has_media:
-            footer_txt = f"▶ {self.media_state.title or 'Playing'}"
-            footer_clr = "#10b981"
+            self.canvas.coords(self.item_clock_mm, rx1 + 16.0 + hh_w + colon_w, ry1 + 32.0)
+            self.canvas.itemconfig(self.item_clock_mm, text=mm_str, fill="#ffffff", state="normal")
         else:
-            footer_txt = "● System Time Synced"
-            footer_clr = "#22d3ee"
+            self.canvas.itemconfig(self.item_clock_hdr, state="hidden")
+            self.canvas.itemconfig(self.item_clock_icon, state="hidden")
+            self.canvas.itemconfig(self.item_btn_min, state="hidden")
+            self.canvas.itemconfig(self.item_btn_close, state="hidden")
+            self.canvas.itemconfig(self.item_clock_time, state="hidden")
+            self.canvas.itemconfig(self.item_clock_colon, state="hidden")
+            self.canvas.itemconfig(self.item_clock_mm, state="hidden")
 
-        self.canvas.coords(self.item_clock_footer, rx1 + 16.0, ry1 + 104.0)
-        self.canvas.itemconfig(self.item_clock_footer, text=footer_txt, fill=footer_clr, state="normal")
+        if y2_wrap >= 150.0:
+            now_dt = datetime.datetime.now()
+            date_str = now_dt.strftime("%A, %d %b")
+            self.canvas.coords(self.item_clock_date, rx1 + 16.0, ry1 + 68.0)
+            self.canvas.itemconfig(self.item_clock_date, text=date_str, fill="#94a3b8", state="normal")
+
+            self.canvas.coords(self.item_clock_div, rx1 + 16.0, ry1 + 94.0, rx2 - 16.0, ry1 + 94.0)
+            self.canvas.itemconfig(self.item_clock_div, fill="#1e293b", state="normal")
+
+            has_media = bool(getattr(self, "media_state", None) and self.media_state.is_active)
+            if has_media:
+                footer_txt = f"▶ {self.media_state.title or 'Playing'}"
+                footer_clr = "#10b981"
+            else:
+                footer_txt = "● System Time Synced"
+                footer_clr = "#22d3ee"
+
+            self.canvas.coords(self.item_clock_footer, rx1 + 16.0, ry1 + 104.0)
+            self.canvas.itemconfig(self.item_clock_footer, text=footer_txt, fill=footer_clr, state="normal")
+        else:
+            self.canvas.itemconfig(self.item_clock_date, state="hidden")
+            self.canvas.itemconfig(self.item_clock_div, state="hidden")
+            self.canvas.itemconfig(self.item_clock_footer, state="hidden")
 
         # --- RIGHT CARD 2: BATTERY & TELEMETRY CARD ---
         rx2_1 = right_x
@@ -2118,72 +2356,77 @@ class JarvisIslandWidget:
         rx2_2 = rx2
         ry2_2 = ry2_1 + rc_h
 
-        bat_str = self.telemetry.get("bat", "44% Charging")
-        is_charging = "Charging" in bat_str or "Plugged" in bat_str
+        if y2_wrap >= 220.0:
+            bat_str = self.telemetry.get("bat", "44% Charging")
+            is_charging = "Charging" in bat_str or "Plugged" in bat_str
 
-        bx1 = rx2_1 + 16.0
-        by1 = ry2_1 + 14.0
-        bx2 = bx1 + 24.0
-        by2 = by1 + 24.0
-        pts_bg = _rounded_rect_points(bx1, by1, bx2, by2, r=6.0)
-        self.canvas.coords(self.item_bat_badge, pts_bg)
-        self.canvas.itemconfig(self.item_bat_badge, fill="#064e3b", outline="#059669", state="normal")
+            bx1 = rx2_1 + 16.0
+            by1 = ry2_1 + 14.0
+            bx2 = bx1 + 24.0
+            by2 = by1 + 24.0
+            pts_bg = _rounded_rect_points(bx1, by1, bx2, by2, r=6.0)
+            self.canvas.coords(self.item_bat_badge, pts_bg)
+            self.canvas.itemconfig(self.item_bat_badge, fill="#064e3b", outline="#059669", state="normal")
 
-        bw, bh = 9.0, 14.0
-        bx = bx1 + 7.5
-        by = by1 + 5.0
-        pts_bolt = [
-            bx + 0.632 * bw, by + 0.000 * bh,
-            bx + 0.000 * bw, by + 0.514 * bh,
-            bx + 0.368 * bw, by + 0.595 * bh,
-            bx + 0.368 * bw, by + 1.000 * bh,
-            bx + 1.000 * bw, by + 0.459 * bh,
-            bx + 0.632 * bw, by + 0.405 * bh,
-        ]
-        self.canvas.coords(self.item_bolt, pts_bolt)
-        self.canvas.itemconfig(self.item_bolt, fill="#34d399", state="normal")
+            # High-DPI Vector Zap (lightning bolt) icon
+            zap_icon = self.icon_mgr.get_icon("zap", size=14, color="#34d399")
+            self.canvas.coords(self.item_bolt, (bx1 + bx2) / 2.0, (by1 + by2) / 2.0)
+            self.canvas.itemconfig(self.item_bolt, image=zap_icon, state="normal")
 
-        self.canvas.coords(self.item_sys_bat, bx2 + 10.0, by1 + 4.0)
-        self.canvas.itemconfig(self.item_sys_bat, text=bat_str, fill="#f8fafc", state="normal")
+            self.canvas.coords(self.item_sys_bat, bx2 + 10.0, by1 + 4.0)
+            self.canvas.itemconfig(self.item_sys_bat, text=bat_str, fill="#f8fafc", state="normal")
 
-        tag_txt = "FAST" if is_charging else "AC"
-        self.canvas.coords(self.item_bat_tag, rx2_2 - 16.0, by1 + 12.0)
-        self.canvas.itemconfig(self.item_bat_tag, text=tag_txt, fill="#34d399", state="normal")
+            tag_txt = "FAST" if is_charging else "AC"
+            self.canvas.coords(self.item_bat_tag, rx2_2 - 16.0, by1 + 12.0)
+            self.canvas.itemconfig(self.item_bat_tag, text=tag_txt, fill="#34d399", state="normal")
+        else:
+            self.canvas.itemconfig(self.item_bat_badge, state="hidden")
+            self.canvas.itemconfig(self.item_bolt, state="hidden")
+            self.canvas.itemconfig(self.item_sys_bat, state="hidden")
+            self.canvas.itemconfig(self.item_bat_tag, state="hidden")
 
-        bar_x = rx2_1 + 78.0
-        bar_w = max(30.0, rx2_2 - bar_x - 16.0)
+        if y2_wrap >= 280.0:
+            bar_x = rx2_1 + 78.0
+            bar_w = max(30.0, rx2_2 - bar_x - 16.0)
 
-        cpu_val = max(0.0, min(100.0, self._cur_cpu_pct))
-        cpu_fill_w = max(3.0, (cpu_val / 100.0) * bar_w)
-        cpu_color = "#f43f5e" if cpu_val > 85.0 else ("#f59e0b" if cpu_val > 70.0 else "#38bdf8")
-        y_cpu = ry2_1 + 54.0
+            cpu_val = max(0.0, min(100.0, self._cur_cpu_pct))
+            cpu_fill_w = max(3.0, (cpu_val / 100.0) * bar_w)
+            cpu_color = "#f43f5e" if cpu_val > 85.0 else ("#f59e0b" if cpu_val > 70.0 else "#38bdf8")
+            y_cpu = ry2_1 + 54.0
 
-        self.canvas.coords(self.item_cpu_lbl, rx2_1 + 16.0, y_cpu - 6.0)
-        self.canvas.itemconfig(self.item_cpu_lbl, text=f"CPU {cpu_val:.0f}%", fill="#94a3b8", state="normal")
+            self.canvas.coords(self.item_cpu_lbl, rx2_1 + 16.0, y_cpu - 6.0)
+            self.canvas.itemconfig(self.item_cpu_lbl, text=f"CPU {cpu_val:.0f}%", fill="#94a3b8", state="normal")
 
-        pts_cpu_tr = _rounded_rect_points(bar_x, y_cpu - 2.0, bar_x + bar_w, y_cpu + 2.0, r=2.0)
-        self.canvas.coords(self.item_cpu_track, pts_cpu_tr)
-        self.canvas.itemconfig(self.item_cpu_track, fill="#1e2433", state="normal")
+            pts_cpu_tr = _rounded_rect_points(bar_x, y_cpu - 2.0, bar_x + bar_w, y_cpu + 2.0, r=2.0)
+            self.canvas.coords(self.item_cpu_track, pts_cpu_tr)
+            self.canvas.itemconfig(self.item_cpu_track, fill="#1e2433", state="normal")
 
-        pts_cpu_fl = _rounded_rect_points(bar_x, y_cpu - 2.0, bar_x + cpu_fill_w, y_cpu + 2.0, r=2.0)
-        self.canvas.coords(self.item_cpu_fill, pts_cpu_fl)
-        self.canvas.itemconfig(self.item_cpu_fill, fill=cpu_color, state="normal")
+            pts_cpu_fl = _rounded_rect_points(bar_x, y_cpu - 2.0, bar_x + cpu_fill_w, y_cpu + 2.0, r=2.0)
+            self.canvas.coords(self.item_cpu_fill, pts_cpu_fl)
+            self.canvas.itemconfig(self.item_cpu_fill, fill=cpu_color, state="normal")
 
-        ram_val = max(0.0, min(100.0, self._cur_ram_pct))
-        ram_fill_w = max(3.0, (ram_val / 100.0) * bar_w)
-        ram_color = "#f43f5e" if ram_val > 85.0 else ("#f59e0b" if ram_val > 75.0 else "#f59e0b")
-        y_ram = ry2_1 + 84.0
+            ram_val = max(0.0, min(100.0, self._cur_ram_pct))
+            ram_fill_w = max(3.0, (ram_val / 100.0) * bar_w)
+            ram_color = "#f43f5e" if ram_val > 85.0 else ("#f59e0b" if ram_val > 75.0 else "#f59e0b")
+            y_ram = ry2_1 + 84.0
 
-        self.canvas.coords(self.item_ram_lbl, rx2_1 + 16.0, y_ram - 6.0)
-        self.canvas.itemconfig(self.item_ram_lbl, text=f"RAM {ram_val:.0f}%", fill="#94a3b8", state="normal")
+            self.canvas.coords(self.item_ram_lbl, rx2_1 + 16.0, y_ram - 6.0)
+            self.canvas.itemconfig(self.item_ram_lbl, text=f"RAM {ram_val:.0f}%", fill="#94a3b8", state="normal")
 
-        pts_ram_tr = _rounded_rect_points(bar_x, y_ram - 2.0, bar_x + bar_w, y_ram + 2.0, r=2.0)
-        self.canvas.coords(self.item_ram_track, pts_ram_tr)
-        self.canvas.itemconfig(self.item_ram_track, fill="#1e2433", state="normal")
+            pts_ram_tr = _rounded_rect_points(bar_x, y_ram - 2.0, bar_x + bar_w, y_ram + 2.0, r=2.0)
+            self.canvas.coords(self.item_ram_track, pts_ram_tr)
+            self.canvas.itemconfig(self.item_ram_track, fill="#1e2433", state="normal")
 
-        pts_ram_fl = _rounded_rect_points(bar_x, y_ram - 2.0, bar_x + ram_fill_w, y_ram + 2.0, r=2.0)
-        self.canvas.coords(self.item_ram_fill, pts_ram_fl)
-        self.canvas.itemconfig(self.item_ram_fill, fill=ram_color, state="normal")
+            pts_ram_fl = _rounded_rect_points(bar_x, y_ram - 2.0, bar_x + ram_fill_w, y_ram + 2.0, r=2.0)
+            self.canvas.coords(self.item_ram_fill, pts_ram_fl)
+            self.canvas.itemconfig(self.item_ram_fill, fill=ram_color, state="normal")
+        else:
+            self.canvas.itemconfig(self.item_cpu_lbl, state="hidden")
+            self.canvas.itemconfig(self.item_cpu_track, state="hidden")
+            self.canvas.itemconfig(self.item_cpu_fill, state="hidden")
+            self.canvas.itemconfig(self.item_ram_lbl, state="hidden")
+            self.canvas.itemconfig(self.item_ram_track, state="hidden")
+            self.canvas.itemconfig(self.item_ram_fill, state="hidden")
     def _hide_expanded_items(self):
         if hasattr(self, "reply_frame"):
             self.reply_frame.place_forget()
@@ -2359,6 +2602,36 @@ class JarvisIslandWidget:
         self.last_reply = f"Voice received: '{text}'"
         self._recompute_target_size()
         threading.Thread(target=self._process_query, args=(text,), daemon=True).start()
+
+    def _on_canvas_press(self, event):
+        x, y = event.x, event.y
+        # Pill chevron button: cx = 484, cy = 28
+        if (x - 484.0)**2 + (y - 28.0)**2 <= 14**2:
+            self._btn_pill_pressed = True
+            self._render()
+        elif hasattr(self, "_btn_mic_cx") and (x - self._btn_mic_cx)**2 + (y - getattr(self, "_btn_mic_cy", 0))**2 <= 16**2:
+            self._btn_mic_pressed = True
+            self._render()
+        elif hasattr(self, "_btn_send_cx") and (x - self._btn_send_cx)**2 + (y - getattr(self, "_btn_send_cy", 0))**2 <= 16**2:
+            self._btn_send_pressed = True
+            self._render()
+        elif hasattr(self, "_btn_min_x") and abs(x - self._btn_min_x) <= 12 and abs(y - getattr(self, "_btn_min_y", 0)) <= 12:
+            self._btn_min_pressed = True
+            self._render()
+        elif hasattr(self, "_btn_close_x") and abs(x - self._btn_close_x) <= 12 and abs(y - getattr(self, "_btn_close_y", 0)) <= 12:
+            self._btn_close_pressed = True
+            self._render()
+
+    def _on_canvas_release(self, event):
+        was_pressed = bool(self._btn_pill_pressed or self._btn_mic_pressed or self._btn_send_pressed or self._btn_min_pressed or self._btn_close_pressed)
+        self._btn_pill_pressed = False
+        self._btn_mic_pressed = False
+        self._btn_send_pressed = False
+        self._btn_min_pressed = False
+        self._btn_close_pressed = False
+        if was_pressed:
+            self._render()
+        self._on_canvas_click(event)
 
     def _on_canvas_click(self, event):
         self._cancel_collapse_timer()
